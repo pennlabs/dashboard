@@ -1,0 +1,17 @@
+{
+  "name": "dashboard-k8s",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "ts-node main.ts"
+  },
+  "dependencies": {
+    "@pennlabs/kittyhawk": "^1.1.11",
+    "cdk8s": "^2.0.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Django
+*.sqlite3
+staticfiles/
+
+# Virtual environments
+.venv/
+venv/
+
+# Node
+node_modules/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
