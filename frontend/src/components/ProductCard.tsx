@@ -12,9 +12,6 @@ export default function ProductCard({ product }: { product: Product }) {
     (sum, dep) => sum + dep.desired_replicas,
     0
   )
-  const lastSynced = product.deployments
-    .map((dep) => dep.last_synced)
-    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
 
   return (
     <Link
@@ -37,10 +34,8 @@ export default function ProductCard({ product }: { product: Product }) {
           {totalReady}/{totalDesired} replicas
         </div>
         <div style={{ color: "#6b7280", fontSize: 13 }}>
-          {product.deployments.length} services
-        </div>
-        <div style={{ color: "#6b7280", fontSize: 13 }}>
-          Last synced: {lastSynced ? new Date(lastSynced).toLocaleTimeString() : "-"}
+          {product.deployments.length} deployment
+          {product.deployments.length === 1 ? "" : "s"}
         </div>
       </div>
     </Link>

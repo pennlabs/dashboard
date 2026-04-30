@@ -15,12 +15,25 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const getProducts = () => apiFetch<Product[]>("/api/products/")
-export const getProduct = (name: string) => apiFetch<Product>(`/api/products/${name}/`)
-export const getDeployment = (id: number) =>
-  apiFetch<Deployment>(`/api/deployments/${id}/`)
-export const getPods = (id: number) => apiFetch<Pod[]>(`/api/deployments/${id}/pods/`)
-export const rollback = (id: number, image: string) =>
-  apiFetch(`/api/deployments/${id}/rollback/`, {
-    method: "POST",
-    body: JSON.stringify({ image }),
-  })
+
+export const getProduct = (name: string) =>
+  apiFetch<Product>(`/api/products/${encodeURIComponent(name)}/`)
+
+export const getDeployment = (namespace: string, name: string) =>
+  apiFetch<Deployment>(
+    `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/`
+  )
+
+export const getPods = (namespace: string, name: string) =>
+  apiFetch<Pod[]>(
+    `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/pods/`
+  )
+
+export const rollback = (namespace: string, name: string, image: string) =>
+  apiFetch(
+    `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/rollback/`,
+    {
+      method: "POST",
+      body: JSON.stringify({ image }),
+    }
+  )

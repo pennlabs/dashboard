@@ -1,3 +1,10 @@
+// Mirrors the JSON shapes the Django API returns.
+//
+// Note: deployments are identified by (namespace, name) -- the same way
+// kubectl identifies them -- not by a database id, because there is no
+// database. The frontend uses these two strings as React keys and route
+// params.
+
 export type HealthStatus = "healthy" | "degraded" | "down" | "unknown"
 
 export interface ContainerStatus {
@@ -14,44 +21,30 @@ export interface Pod {
   containers: ContainerStatus[]
 }
 
-export interface DeploymentEvent {
-  id: number
-  version: string
-  previous_version: string
-  event_type: "deploy" | "rollback" | "scale"
-  timestamp: string
-  triggered_by: string
-}
-
 export interface ReplicaSetSnapshot {
-  id: number
+  revision: number
   version: string
   image: string
-  revision: number
-  created_at: string
+  created_at: string | null
 }
 
 export interface DeploymentSummary {
-  id: number
   name: string
   namespace: string
+  product_name: string
   current_version: string
   desired_replicas: number
   ready_replicas: number
+  available_replicas: number
+  updated_replicas: number
   is_healthy: boolean
-  last_synced: string
 }
 
 export interface Deployment extends DeploymentSummary {
-  product_name: string
-  available_replicas: number
-  updated_replicas: number
-  events: DeploymentEvent[]
   replicasets: ReplicaSetSnapshot[]
 }
 
 export interface Product {
-  id: number
   name: string
   display_name: string
   repo_url: string

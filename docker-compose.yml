@@ -1,0 +1,44 @@
+# Local-only docker-compose for the demo.
+#
+# `docker compose up --build` brings up the whole stack:
+#
+#   - backend:  Django + DRF on http://localhost:8000
+#   - frontend: nginx serving the compiled React bundle on http://localhost:3000
+#
+# The backend container talks to whatever Kubernetes cluster your *host*
+# machine is currently pointed at, by mounting your local kubeconfig
+# read-only. This is what makes the dashboard "just work" locally without
+# baking AWS/EKS credentials into the image.
+
+services:
+  backend:
+    build: ./backend
+    image: dashboard-backend:local
+    environment:
+      DJANGO_SETTINGS_MODULE: dashboard.settings.development
+      # Force out-of-cluster mode so we read the mounted ~/.kube/config rather
+      # than looking for a ServiceAccount token that won't be there locally.
+      K8S_IN_CLUSTER: "false"
+    volumes:
+      # Mount the host's kubeconfig read-only into the container at the path
+      # the kubernetes Python client expects.
+      - ${HOME}/.kube:/root/.kube:ro
+    ports:
+      - "8000:8000"
+    # Override the production CMD with the dev-friendly autoreloading server.
+    command: >-
+      python manage.py runserver 0.0.0.0:8000
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # When the React bundle runs in the user's browser, it can't say
+        # "backend" -- that name only resolves inside Docker's network. So we
+        # bake in the host-visible URL at build time.
+        REACT_APP_API_BASE_URL: "http://localhost:8000"
+    image: dashboard-frontend:local
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

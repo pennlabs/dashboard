@@ -1,0 +1,136 @@
+# Fake deployments for local demos.
+#
+# Apply against any cluster (kind, minikube, Docker Desktop, real EKS) to give
+# the dashboard something to display when you don't have access to the real
+# Penn Labs production cluster:
+#
+#   kubectl apply -f k8s/sample-deployments.yaml
+#
+# Each Deployment carries the three labels the dashboard relies on:
+#
+#   app.kubernetes.io/managed-by  -> "kittyhawk"   (label-selector filter)
+#   app.kubernetes.io/part-of     -> the product   (groups deployments)
+#   app.kubernetes.io/version     -> a fake git SHA (shown as "deployed version")
+#   app.kubernetes.io/name        -> the deployment name (used to find pods)
+#
+# The pods themselves are lightweight nginx pods. They never receive traffic,
+# they exist only so the dashboard has real Kubernetes objects to render.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubs-backend
+  labels:
+    app.kubernetes.io/managed-by: kittyhawk
+    app.kubernetes.io/part-of: penn-clubs
+    app.kubernetes.io/version: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+    app.kubernetes.io/name: clubs-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clubs-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: kittyhawk
+        app.kubernetes.io/part-of: penn-clubs
+        app.kubernetes.io/version: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        app.kubernetes.io/name: clubs-backend
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25-alpine
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubs-frontend
+  labels:
+    app.kubernetes.io/managed-by: kittyhawk
+    app.kubernetes.io/part-of: penn-clubs
+    app.kubernetes.io/version: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+    app.kubernetes.io/name: clubs-frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clubs-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: kittyhawk
+        app.kubernetes.io/part-of: penn-clubs
+        app.kubernetes.io/version: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        app.kubernetes.io/name: clubs-frontend
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25-alpine
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ohq-backend
+  labels:
+    app.kubernetes.io/managed-by: kittyhawk
+    app.kubernetes.io/part-of: ohq
+    app.kubernetes.io/version: 9f8e7d6c5b4a3928176054321fedcba9876543210
+    app.kubernetes.io/name: ohq-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ohq-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: kittyhawk
+        app.kubernetes.io/part-of: ohq
+        app.kubernetes.io/version: 9f8e7d6c5b4a3928176054321fedcba9876543210
+        app.kubernetes.io/name: ohq-backend
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25-alpine
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+---
+# Intentionally broken: image doesn't exist, so the pod will get stuck in
+# ImagePullBackOff. This is the demo's "degraded product" -- it makes the
+# health badges and per-pod error reasons actually do something on screen.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: courses-backend
+  labels:
+    app.kubernetes.io/managed-by: kittyhawk
+    app.kubernetes.io/part-of: penn-courses
+    app.kubernetes.io/version: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+    app.kubernetes.io/name: courses-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: courses-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: kittyhawk
+        app.kubernetes.io/part-of: penn-courses
+        app.kubernetes.io/version: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+        app.kubernetes.io/name: courses-backend
+    spec:
+      containers:
+        - name: app
+          image: this-image-does-not-exist:latest
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }

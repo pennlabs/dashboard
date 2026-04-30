@@ -1,38 +1,34 @@
+"""Base Django settings shared by dev and prod.
+
+Notable simplifications vs. a typical Django app:
+  - No database is configured here. The dashboard reads live from the K8s
+    API, so we use the in-memory dummy backend. Subclasses (production.py)
+    can swap this out if persistence is ever needed again.
+  - No auth backends. For the course/local demo all endpoints are open;
+    production deployment would re-add Penn Labs OAuth via
+    `django-labs-accounts`.
+"""
+
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # auth + contenttypes are required by Django REST Framework's request
+    # machinery even when we set `DEFAULT_PERMISSION_CLASSES = [AllowAny]`.
+    # No tables are ever created since we use the dummy DB backend.
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
-    "accounts",
     "deployments",
-]
-
-PLATFORM_ACCOUNTS = {
-    "ADMIN_PERMISSION": "dashboard_admin",
-}
-
-AUTHENTICATION_BACKENDS = [
-    "accounts.backends.LabsUserBackend",
-    "django.contrib.auth.backends.ModelBackend",
 ]
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = "dashboard.urls"
@@ -41,25 +37,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    }
-]
+# We don't use Django's ORM, so the dummy backend is enough to keep Django happy.
+DATABASES = {
+    "default": {"ENGINE": "django.db.backends.dummy"},
+}
 
 REST_FRAMEWORK = {
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication"
-    ],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
 }

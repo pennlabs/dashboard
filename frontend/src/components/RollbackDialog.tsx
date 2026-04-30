@@ -15,6 +15,8 @@ export default function RollbackDialog({
   onClose,
   isLoading,
 }: Props) {
+  // Default to the second-newest revision (i.e. the previous version), which
+  // is the most common rollback target.
   const [selectedImage, setSelectedImage] = useState(
     replicasets[1]?.image ?? replicasets[0]?.image ?? ""
   )
@@ -48,14 +50,14 @@ export default function RollbackDialog({
           style={{ padding: 8, border: "1px solid #d1d5db", borderRadius: 6 }}
         >
           {replicasets.map((rs) => (
-            <option key={rs.id} value={rs.image}>
-              Rev {rs.revision} - {rs.version.slice(0, 7)} -{" "}
-              {new Date(rs.created_at).toLocaleDateString()}
+            <option key={rs.revision} value={rs.image}>
+              Rev {rs.revision} - {rs.version ? rs.version.slice(0, 7) : "?"} -{" "}
+              {rs.created_at ? new Date(rs.created_at).toLocaleDateString() : "?"}
             </option>
           ))}
         </select>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={onClose} disabled={isLoading}>
             Cancel
           </button>
           <button
@@ -67,10 +69,11 @@ export default function RollbackDialog({
               border: "none",
               borderRadius: 4,
               padding: "8px 12px",
+              cursor: "pointer",
             }}
             disabled={isLoading}
           >
-            Confirm
+            {isLoading ? "Rolling back..." : "Confirm"}
           </button>
         </div>
       </div>

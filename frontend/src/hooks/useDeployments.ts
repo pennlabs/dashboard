@@ -17,28 +17,28 @@ export const useProduct = (name: string) =>
     enabled: Boolean(name),
   })
 
-export const useDeployment = (id: number) =>
+export const useDeployment = (namespace: string, name: string) =>
   useQuery({
-    queryKey: ["deployment", id],
-    queryFn: () => api.getDeployment(id),
+    queryKey: ["deployment", namespace, name],
+    queryFn: () => api.getDeployment(namespace, name),
     refetchInterval: 15000,
-    enabled: Number.isFinite(id) && id > 0,
+    enabled: Boolean(namespace && name),
   })
 
-export const usePods = (id: number) =>
+export const usePods = (namespace: string, name: string) =>
   useQuery({
-    queryKey: ["pods", id],
-    queryFn: () => api.getPods(id),
+    queryKey: ["pods", namespace, name],
+    queryFn: () => api.getPods(namespace, name),
     refetchInterval: 10000,
-    enabled: Number.isFinite(id) && id > 0,
+    enabled: Boolean(namespace && name),
   })
 
-export const useRollback = (deploymentId: number) => {
+export const useRollback = (namespace: string, name: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (image: string) => api.rollback(deploymentId, image),
+    mutationFn: (image: string) => api.rollback(namespace, name, image),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["deployment", deploymentId] })
+      qc.invalidateQueries({ queryKey: ["deployment", namespace, name] })
       qc.invalidateQueries({ queryKey: ["products"] })
     },
   })

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { BrowserRouter, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom"
 
 import Dashboard from "./pages/Dashboard"
 import DeploymentDetail from "./pages/DeploymentDetail"
@@ -25,14 +25,28 @@ export default function App() {
               padding: "12px 24px",
               fontSize: "18px",
               fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
-            Penn Labs Deployments
+            <Link
+              to="/"
+              style={{ color: "white", textDecoration: "none" }}
+            >
+              Penn Labs Deployments
+            </Link>
+            <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.7 }}>
+              live from kubernetes
+            </span>
           </header>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/products/:name" element={<ProductDetail />} />
-            <Route path="/deployments/:id" element={<DeploymentDetail />} />
+            <Route
+              path="/deployments/:namespace/:name"
+              element={<DeploymentDetail />}
+            />
           </Routes>
         </div>
       </BrowserRouter>

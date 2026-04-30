@@ -1,7 +1,14 @@
+# Django + REST framework -- the API layer.
 django==4.2.*
 djangorestframework==3.15.*
+
+# Allow the React dev server (localhost:3000) to call the API (localhost:8000).
 django-cors-headers==4.*
-django-labs-accounts==0.8.*
+
+# Official Kubernetes Python client. Talks to the K8s API server using either
+# ~/.kube/config (local dev) or the ServiceAccount token mounted into a pod
+# (in-cluster). This is the entire reason this app exists.
 kubernetes==29.*
-psycopg2-binary==2.9.*
+
+# WSGI server used by the Docker image.
 gunicorn==21.*

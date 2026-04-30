@@ -1,0 +1,13 @@
+# kind cluster config used for the local demo.
+#
+# `kind` (Kubernetes IN Docker) lets us spin up a real Kubernetes cluster
+# inside a single Docker container -- perfect for running the dashboard's
+# demo without needing access to a real cloud cluster.
+#
+# Usage:
+#   kind create cluster --name dashboard-demo --config k8s/kind-cluster.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: dashboard-demo
+nodes:
+  - role: control-plane

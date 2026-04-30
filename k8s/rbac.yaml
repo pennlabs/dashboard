@@ -1,0 +1,54 @@
+# RBAC for the dashboard backend.
+#
+# The backend's pod runs as a ServiceAccount (created by Kittyhawk in
+# main.ts). By default a ServiceAccount has zero permissions on the K8s API,
+# so listing Deployments fails with 403 Forbidden.
+#
+# This manifest grants the *minimum* read-only verbs the dashboard needs:
+#
+#   - Deployments  (apps/v1)   -> the main "what's running" view
+#   - ReplicaSets  (apps/v1)   -> rollout history + rollback target list
+#   - Pods         (core/v1)   -> per-pod debugging info (restarts, reasons)
+#
+# We grant `get`, `list`, and `watch`. The dashboard currently only uses
+# `list` and `get`, but `watch` is included so a future version can stream
+# updates without polling. We do NOT grant any write verbs (create/update/
+# delete) -- the rollback feature uses `patch`, granted separately and only
+# on Deployments.
+#
+# This is a ClusterRole (not Role) because Penn Labs services are spread
+# across multiple namespaces and we want the dashboard to see everything in
+# one place.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-reader
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Patch is required by the rollback feature, which calls
+  # AppsV1Api.patch_namespaced_deployment to swap in a previous container
+  # image. Scoped to deployments only -- pods/replicasets stay read-only.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-reader
+subjects:
+  - kind: ServiceAccount
+    # This name comes from Kittyhawk's `createServiceAccount: true` in
+    # main.ts -- it's derived from the DjangoApplication's id ("django-api").
+    name: dashboard-django-api
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: dashboard-reader
+  apiGroup: rbac.authorization.k8s.io
