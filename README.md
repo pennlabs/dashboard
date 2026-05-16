@@ -108,30 +108,6 @@ docker compose up --build
 # backend:  http://localhost:8000
 ```
 
-## Quick start (real cluster: Penn Labs production)
-
-Anyone with access to the Penn Labs EKS cluster can point the local
-dashboard at it — no deployment of the dashboard required. The backend
-reads `~/.kube/config` so whatever cluster `kubectl` is on, the dashboard
-sees.
-
-```bash
-aws eks update-kubeconfig \
-  --name production \
-  --region us-east-1 \
-  --role-arn arn:aws:iam::449445102765:role/kubectl \
-  --profile pennlabs
-
-kubectl config current-context
-# arn:aws:eks:us-east-1:449445102765:cluster/production
-
-# Then run the backend + frontend exactly as in the kind quickstart.
-```
-
-The dashboard now shows ~35 real deployments across all Penn Labs products.
-**Note**: the rollback button performs a real patch on the live cluster.
-Don't click it on production unless you mean it.
-
 ## Running the tests
 
 ```bash

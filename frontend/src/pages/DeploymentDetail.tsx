@@ -15,10 +15,16 @@ export default function DeploymentDetail() {
   const { data: pods } = usePods(namespace, name)
   const rollbackMutation = useRollback(namespace, name)
 
-  if (isLoading) return <div style={{ padding: 24 }}>Loading...</div>
+  if (isLoading)
+    return (
+      <div className="page">
+        <div className="skeleton" style={{ height: 80, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 240 }} />
+      </div>
+    )
   if (error || !dep)
     return (
-      <div style={{ padding: 24, color: "#991b1b" }}>
+      <div className="page" style={{ color: "var(--danger)" }}>
         Failed to load deployment {namespace}/{name}
       </div>
     )
@@ -28,31 +34,43 @@ export default function DeploymentDetail() {
     setShowRollback(false)
   }
 
+  const status = getHealthStatus(dep.ready_replicas, dep.desired_replicas)
   const rolloutInProgress = dep.updated_replicas < dep.desired_replicas
 
   return (
-    <div style={{ padding: 24, display: "grid", gap: 16 }}>
-      <Link to={dep.product_name ? `/products/${dep.product_name}` : "/"}>
-        {"<-"} Back
-      </Link>
+    <div className="page" style={{ display: "grid", gap: 20 }}>
+      <BackLink
+        to={dep.product_name ? `/products/${dep.product_name}` : "/"}
+        label={dep.product_name ? `Back to ${dep.product_name}` : "All products"}
+      />
 
-      <div style={{ display: "grid", gap: 8 }}>
-        <h2 style={{ margin: 0 }}>{dep.name}</h2>
-        <code style={{ color: "#6b7280" }}>
-          {dep.name}.{dep.namespace}
-        </code>
-        <HealthBadge status={getHealthStatus(dep.ready_replicas, dep.desired_replicas)} />
+      <div
+        className="card"
+        style={{
+          padding: 20,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "grid", gap: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
+            {dep.name}
+          </h2>
+          <code style={{ color: "var(--text-muted)", fontSize: 13 }}>
+            {dep.name}.{dep.namespace}
+          </code>
+        </div>
+        <HealthBadge status={status} />
       </div>
 
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
           gap: 12,
-          background: "white",
-          border: "1px solid #e5e7eb",
-          borderRadius: 8,
-          padding: 12,
         }}
       >
         <Stat label="Desired" value={dep.desired_replicas} />
@@ -62,69 +80,95 @@ export default function DeploymentDetail() {
       </div>
 
       {rolloutInProgress ? (
-        <div style={{ display: "grid", gap: 6 }}>
-          <div>Rollout in progress...</div>
-          <progress
-            value={dep.updated_replicas}
-            max={dep.desired_replicas}
-            style={{ width: "100%" }}
-          />
+        <div
+          className="card"
+          style={{ padding: 14, display: "grid", gap: 8 }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            Rollout in progress…{" "}
+            <span className="mono" style={{ color: "var(--text)" }}>
+              {dep.updated_replicas}/{dep.desired_replicas}
+            </span>
+          </div>
+          <div className="progress degraded">
+            <span
+              style={{
+                width: `${
+                  dep.desired_replicas === 0
+                    ? 0
+                    : Math.round(
+                        (dep.updated_replicas / dep.desired_replicas) * 100
+                      )
+                }%`,
+              }}
+            />
+          </div>
         </div>
       ) : null}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span>Current version:</span>
-        <VersionLink version={dep.current_version} repoName={dep.product_name} />
+      <div
+        className="card"
+        style={{
+          padding: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+          Current version
+        </span>
+        <VersionLink
+          version={dep.current_version}
+          repoName={dep.product_name}
+        />
+        {dep.replicasets.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setShowRollback(true)}
+            className="btn btn-primary"
+            style={{ marginLeft: "auto" }}
+          >
+            Roll back
+          </button>
+        ) : null}
       </div>
 
-      {dep.replicasets.length > 1 ? (
-        <button
-          type="button"
-          onClick={() => setShowRollback(true)}
-          style={{
-            background: "#1e3a5f",
-            color: "white",
-            padding: "8px 16px",
-            borderRadius: 4,
-            border: "none",
-            width: "fit-content",
-            cursor: "pointer",
-          }}
-        >
-          Roll back
-        </button>
-      ) : null}
-
-      <div style={{ display: "grid", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Pods</h3>
+      <div style={{ display: "grid", gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Pods</h3>
         {pods === undefined ? (
-          <div style={{ color: "#6b7280" }}>Loading pods...</div>
+          <div className="card" style={{ padding: 16, color: "var(--text-muted)" }}>
+            Loading pods…
+          </div>
         ) : pods.length === 0 ? (
-          <div style={{ color: "#6b7280" }}>No pods found.</div>
+          <div className="card" style={{ padding: 16, color: "var(--text-muted)" }}>
+            No pods found.
+          </div>
         ) : (
           <PodStatusList pods={pods} />
         )}
       </div>
 
-      <div style={{ display: "grid", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>ReplicaSet history</h3>
+      <div style={{ display: "grid", gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+          ReplicaSet history
+        </h3>
         <ol
           style={{
             margin: 0,
             padding: 0,
             listStyle: "none",
             display: "grid",
-            gap: 6,
+            gap: 8,
           }}
         >
           {dep.replicasets.map((rs) => (
             <li
               key={rs.revision}
+              className="card"
               style={{
-                background: "white",
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-                padding: 10,
+                padding: 12,
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
@@ -133,22 +177,32 @@ export default function DeploymentDetail() {
               }}
             >
               <span
+                className="mono"
                 style={{
-                  background: "#e5e7eb",
+                  background: "var(--surface-2)",
                   borderRadius: 999,
-                  padding: "2px 8px",
-                  fontFamily: "monospace",
-                  fontSize: 12,
+                  padding: "2px 10px",
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border)",
                 }}
               >
                 rev {rs.revision}
               </span>
-              <code>{rs.version ? rs.version.slice(0, 7) : "-"}</code>
-              <span style={{ color: "#6b7280", fontFamily: "monospace" }}>
+              <code style={{ color: "var(--text)" }}>
+                {rs.version ? rs.version.slice(0, 7) : "-"}
+              </code>
+              <span className="mono" style={{ color: "var(--text-muted)" }}>
                 {rs.image}
               </span>
               {rs.created_at ? (
-                <span style={{ color: "#9ca3af", marginLeft: "auto" }}>
+                <span
+                  style={{
+                    color: "var(--text-muted)",
+                    marginLeft: "auto",
+                    fontSize: 12,
+                  }}
+                >
                   {new Date(rs.created_at).toLocaleString()}
                 </span>
               ) : null}
@@ -171,9 +225,51 @@ export default function DeploymentDetail() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div>
-      <div style={{ color: "#6b7280", fontSize: 12 }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{value}</div>
+    <div
+      className="card"
+      style={{
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          color: "var(--text-muted)",
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 700,
+          marginTop: 4,
+          color: "var(--text)",
+        }}
+      >
+        {value}
+      </div>
     </div>
+  )
+}
+
+function BackLink({ to, label }: { to: string; label: string }) {
+  return (
+    <Link
+      to={to}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 13,
+        color: "var(--text-secondary)",
+        width: "fit-content",
+      }}
+    >
+      <span aria-hidden="true">←</span> {label}
+    </Link>
   )
 }

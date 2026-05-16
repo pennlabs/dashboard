@@ -23,57 +23,86 @@ export default function RollbackDialog({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.5)",
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
+        padding: 16,
       }}
+      onClick={onClose}
     >
       <div
+        onClick={(e) => e.stopPropagation()}
         style={{
-          background: "white",
+          background: "var(--surface)",
           padding: 24,
-          borderRadius: 8,
-          minWidth: 400,
+          borderRadius: 14,
+          minWidth: 420,
+          maxWidth: "100%",
           display: "grid",
-          gap: 16,
+          gap: 18,
+          border: "1px solid var(--border)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
-        <h3 style={{ margin: 0 }}>Select version to roll back to</h3>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+            Roll back deployment
+          </h3>
+          <p
+            style={{
+              margin: "6px 0 0",
+              color: "var(--text-secondary)",
+              fontSize: 13,
+            }}
+          >
+            Select a previous revision to redeploy.
+          </p>
+        </div>
         <select
+          className="select"
           value={selectedImage}
           onChange={(e) => setSelectedImage(e.target.value)}
-          style={{ padding: 8, border: "1px solid #d1d5db", borderRadius: 6 }}
         >
           {replicasets.map((rs) => (
             <option key={rs.revision} value={rs.image}>
-              Rev {rs.revision} - {rs.version ? rs.version.slice(0, 7) : "?"} -{" "}
-              {rs.created_at ? new Date(rs.created_at).toLocaleDateString() : "?"}
+              Rev {rs.revision} · {rs.version ? rs.version.slice(0, 7) : "?"}{" "}
+              ·{" "}
+              {rs.created_at
+                ? new Date(rs.created_at).toLocaleDateString()
+                : "?"}
             </option>
           ))}
         </select>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose} disabled={isLoading}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onClose}
+            disabled={isLoading}
+          >
             Cancel
           </button>
           <button
             type="button"
+            className="btn btn-danger"
             onClick={() => onConfirm(selectedImage)}
-            style={{
-              background: "#ef4444",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              padding: "8px 12px",
-              cursor: "pointer",
-            }}
             disabled={isLoading}
           >
-            {isLoading ? "Rolling back..." : "Confirm"}
+            {isLoading ? "Rolling back…" : "Confirm rollback"}
           </button>
         </div>
       </div>
