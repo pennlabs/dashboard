@@ -26,6 +26,8 @@ services:
     ports:
       - "8000:8000"
     # Override the production CMD with the dev-friendly autoreloading server.
+    # Bare `python` is the uv-managed venv at /app/.venv, which the image puts
+    # first on PATH -- no `uv run` needed (uv isn't in the runtime stage).
     command: >-
       python manage.py runserver 0.0.0.0:8000
 

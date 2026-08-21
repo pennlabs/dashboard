@@ -1,0 +1,13 @@
+# The image builds its own virtualenv in the build stage and copies it into the
+# runtime stage. Without this entry, `COPY . .` would overwrite that venv with
+# the host's -- which on macOS means Darwin binaries inside a Linux container.
+.venv/
+
+# Never needed in the image, and excluding them keeps the build context small
+# so layer caching isn't invalidated by local-only churn.
+__pycache__/
+*.py[cod]
+.DS_Store
+staticfiles/
+.env
+.env.*

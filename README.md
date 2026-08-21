@@ -14,8 +14,8 @@ every page load (no database, no sync worker).
 - **React + TypeScript frontend** with React Query for auto-refreshing data
   (every 10–15 s).
 - **Multi-stage Docker builds** for both services. The frontend ships as
-  nginx + 25 MB of static assets; the backend ships without pip caches or
-  build tools.
+  nginx + 25 MB of static assets; the backend ships a resolved virtualenv
+  with no package-manager caches or build tools.
 - **CDK8s / Kittyhawk manifests** describing how the dashboard would deploy
   to a real cluster, plus a hand-written `rbac.yaml` showing the
   least-privilege ClusterRole the backend would need.
@@ -47,7 +47,7 @@ the dashboard only surfaces Penn Labs–managed resources, not system pods.
 | **Orchestration**          | `k8s/main.ts` — Kubernetes Deployments + Services + Ingress              |
 | **Infrastructure as Code** | CDK8s in TypeScript synthesizes raw K8s YAML                             |
 | **RBAC / least privilege** | `k8s/rbac.yaml` — narrowly-scoped ClusterRole                            |
-| **Reproducibility**        | Pinned base images; `docker compose up` produces the same env everywhere |
+| **Reproducibility**        | `uv.lock` pins every transitive dep; pinned base images; `docker compose up` produces the same env everywhere |
 | **Portability**            | Same image runs locally (kind), in EKS, or any K8s cluster               |
 | **Testability**            | `backend/deployments/tests.py` with mocked K8s client                    |
 | **Observability**          | The dashboard itself is an observability tool                            |
@@ -61,10 +61,15 @@ fake-but-realistic Deployments, and runs the dashboard against them.
 ### Prerequisites
 
 - Docker Desktop (running)
-- `kubectl`, `kind`, Node.js 18+, Python 3.13
+- `kubectl`, `kind`, Node.js 18+, `uv`
   ```bash
-  brew install kubectl kind node python@3.13
+  brew install kubectl kind node uv
   ```
+
+`uv` manages the backend's Python dependencies. You don't need to install
+Python yourself — `uv sync` reads `requires-python` from
+`backend/pyproject.toml` and fetches a matching interpreter if your system
+doesn't already have one.
 
 ### Run it
 
@@ -80,9 +85,8 @@ kubectl apply -f k8s/sample-deployments.yaml
 
 # 3. Backend
 cd backend
-python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python manage.py runserver &
+uv sync                                   # creates .venv from uv.lock
+uv run python manage.py runserver &
 cd ..
 
 # 4. Frontend
@@ -112,9 +116,12 @@ docker compose up --build
 
 ```bash
 cd backend
-.venv/bin/python manage.py test
+uv run python manage.py test
 # Ran 8 tests in 0.005s — OK
 ```
+
+`uv run` syncs the environment against `uv.lock` before executing, so you
+never run tests against a stale set of packages.
 
 The tests mock the Kubernetes client entirely, so they don't need a cluster.
 They verify view logic: label-based product grouping, dict shaping for the
@@ -124,8 +131,9 @@ JSON API, 404 handling, and rollback input validation.
 
 ```
 backend/
-├── Dockerfile                       # multi-stage Python build
-├── requirements.txt
+├── Dockerfile                       # multi-stage uv build
+├── pyproject.toml                   # dependency declarations (uv)
+├── uv.lock                          # fully-pinned resolution — commit this
 ├── manage.py
 ├── dashboard/                       # Django project
 │   ├── settings/

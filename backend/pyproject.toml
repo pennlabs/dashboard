@@ -1,0 +1,28 @@
+[project]
+name = "dashboard-backend"
+version = "0.1.0"
+description = "Django + DRF API that reads live deployment state from the Kubernetes API."
+requires-python = ">=3.13"
+
+dependencies = [
+    # Django + REST framework -- the API layer.
+    "django==4.2.*",
+    "djangorestframework==3.15.*",
+
+    # Allow the React dev server (localhost:3000) to call the API (localhost:8000).
+    "django-cors-headers==4.*",
+
+    # Official Kubernetes Python client. Talks to the K8s API server using either
+    # ~/.kube/config (local dev) or the ServiceAccount token mounted into a pod
+    # (in-cluster). This is the entire reason this app exists.
+    "kubernetes==29.*",
+
+    # WSGI server used by the Docker image.
+    "gunicorn==21.*",
+]
+
+[tool.uv]
+# This is an application, not an installable library. Setting package = false
+# tells uv to manage the dependency set without trying to build and install
+# `dashboard-backend` itself, so no build backend is needed.
+package = false
