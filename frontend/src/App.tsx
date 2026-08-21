@@ -18,7 +18,12 @@ export default function App() {
             <header className="app-header">
               <div className="app-header-inner">
                 <Link to="/" className="brand">
-                  <span className="brand-mark">PL</span>
+                  <img
+                    src="/logo.svg"
+                    alt=""
+                    className="brand-logo"
+                    aria-hidden="true"
+                  />
                   <span>Penn Labs Deployments</span>
                 </Link>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

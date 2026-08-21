@@ -186,19 +186,13 @@ button {
   text-decoration: none;
 }
 
-.brand-mark {
+.brand-logo {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--header-accent), #4d7a00);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #000;
-  font-weight: 800;
-  font-size: 13px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 6px 12px rgba(118, 185, 0, 0.25);
+  display: block;
+  object-fit: contain;
+  /* Subtle glow behind the icon so it pops against the dark header */
+  filter: drop-shadow(0 4px 10px rgba(118, 185, 0, 0.25));
 }
 
 .live-pill {
