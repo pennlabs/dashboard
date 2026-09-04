@@ -187,12 +187,13 @@ button {
 }
 
 .brand-logo {
-  width: 28px;
-  height: 28px;
+  /* Wordmark, not a square icon -- height drives it, width follows the
+     viewBox. The navy paths inherit .brand's color so they read on the dark
+     header; the blue accent stays branded. */
+  height: 26px;
+  width: auto;
   display: block;
-  object-fit: contain;
-  /* Subtle glow behind the icon so it pops against the dark header */
-  filter: drop-shadow(0 4px 10px rgba(118, 185, 0, 0.25));
+  flex-shrink: 0;
 }
 
 .live-pill {

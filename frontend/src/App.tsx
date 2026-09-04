@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom"
 
+import LabsLogo from "./components/LabsLogo"
 import ThemeToggle from "./components/ThemeToggle"
 import Dashboard from "./pages/Dashboard"
 import DeploymentDetail from "./pages/DeploymentDetail"
@@ -18,13 +19,8 @@ export default function App() {
             <header className="app-header">
               <div className="app-header-inner">
                 <Link to="/" className="brand">
-                  <img
-                    src="/logo.svg"
-                    alt=""
-                    className="brand-logo"
-                    aria-hidden="true"
-                  />
-                  <span>Penn Labs Deployments</span>
+                  <LabsLogo />
+                  <span>Deployments</span>
                 </Link>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className="live-pill">
