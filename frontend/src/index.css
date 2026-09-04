@@ -548,3 +548,64 @@ button {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
+
+/* ---------- Auth gate ---------- */
+/* Full-page states shown instead of the dashboard when the viewer isn't a
+   signed-in team lead. See components/AuthGate.tsx. */
+.auth-gate {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.auth-gate-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 32px;
+  max-width: 460px;
+  text-align: center;
+}
+.auth-gate-card h1 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.auth-gate-card p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.auth-gate-card .btn {
+  text-decoration: none;
+}
+.auth-gate-card .btn:hover {
+  text-decoration: none;
+}
+
+/* ---------- Signed-in user chip (header) ---------- */
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.user-chip a {
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  padding-left: 8px;
+}
+.user-chip a:hover {
+  color: var(--header-text);
+  text-decoration: underline;
+}

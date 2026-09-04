@@ -46,5 +46,11 @@ COPY --from=build /app/.venv /app/.venv
 COPY . .
 
 EXPOSE 8000
+# `migrate` first: the auth tables (users, sessions, OAuth tokens) live in a
+# SQLite file inside the container, so a fresh pod starts with no schema. It's
+# idempotent and takes well under a second. Nothing here is a source of truth --
+# lead status is re-fetched from Platform on every login -- so losing the file on
+# restart just means users silently re-authenticate via Platform SSO.
+#
 # 2 gunicorn workers is fine -- the app is I/O bound (waiting on the K8s API).
-CMD ["gunicorn", "dashboard.wsgi", "--bind", "0.0.0.0:8000", "--workers", "2"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn dashboard.wsgi --bind 0.0.0.0:8000 --workers 2"]

@@ -51,3 +51,20 @@ export interface Product {
   is_healthy: boolean
   deployments: DeploymentSummary[]
 }
+
+export interface UserProfile {
+  pennkey: string
+  first_name: string
+  last_name: string
+  email: string
+}
+
+/**
+ * Response from /api/me/. Always resolves, so the two "no access" cases stay
+ * distinguishable: not signed in at all, versus signed in but not a team lead.
+ */
+export interface CurrentUser {
+  authenticated: boolean
+  is_lead: boolean
+  user: UserProfile | null
+}

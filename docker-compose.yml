@@ -5,6 +5,10 @@
 #   - backend:  Django + DRF on http://localhost:8000
 #   - frontend: nginx serving the compiled React bundle on http://localhost:3000
 #
+# Use http://localhost:3000 -- that's the origin the OAuth client is registered
+# against, and nginx forwards /api from there to the backend. The :8000 mapping
+# is kept only for poking at the API directly.
+#
 # The backend container talks to whatever Kubernetes cluster your *host*
 # machine is currently pointed at, by mounting your local kubeconfig
 # read-only. This is what makes the dashboard "just work" locally without
@@ -19,6 +23,11 @@ services:
       # Force out-of-cluster mode so we read the mounted ~/.kube/config rather
       # than looking for a ServiceAccount token that won't be there locally.
       K8S_IN_CLUSTER: "false"
+      # OAuth callback. The browser only ever talks to localhost:3000 (nginx
+      # forwards /api to this service), so Platform must send users back there.
+      # Development settings already default to this; stated here so the whole
+      # flow is visible from the compose file.
+      LABS_REDIRECT_URI: "http://localhost:3000/api/accounts/callback/"
     volumes:
       # Mount the host's kubeconfig read-only into the container at the path
       # the kubernetes Python client expects.
@@ -28,18 +37,27 @@ services:
     # Override the production CMD with the dev-friendly autoreloading server.
     # Bare `python` is the uv-managed venv at /app/.venv, which the image puts
     # first on PATH -- no `uv run` needed (uv isn't in the runtime stage).
+    #
+    # `migrate` has to be repeated here: overriding CMD also drops the migrate
+    # step the image's own CMD runs, and without it the auth tables don't exist
+    # and signing in 500s.
     command: >-
-      python manage.py runserver 0.0.0.0:8000
+      sh -c "python manage.py migrate --noinput &&
+      exec python manage.py runserver 0.0.0.0:8000"
 
   frontend:
     build:
       context: ./frontend
       args:
-        # When the React bundle runs in the user's browser, it can't say
-        # "backend" -- that name only resolves inside Docker's network. So we
-        # bake in the host-visible URL at build time.
-        REACT_APP_API_BASE_URL: "http://localhost:8000"
+        # Empty on purpose. The bundle calls /api on its own origin and nginx
+        # forwards that to the backend, so the browser only ever sees
+        # localhost:3000. Pointing it straight at :8000 instead would make the
+        # OAuth callback cross-origin and break the session cookie.
+        REACT_APP_API_BASE_URL: ""
     image: dashboard-frontend:local
+    environment:
+      # Where nginx forwards /api. "backend" resolves on Docker's network.
+      API_UPSTREAM: "http://backend:8000"
     ports:
       - "3000:80"
     depends_on:

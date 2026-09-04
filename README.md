@@ -4,7 +4,10 @@ A real-time deployment monitoring dashboard for Kubernetes. It gives PMs and
 developers a single pane of glass for every service running on a cluster:
 health, replica counts, deployed git SHAs, pod-level diagnostics, and
 ReplicaSet rollout history — all read **live** from the Kubernetes API on
-every page load (no database, no sync worker).
+every page load (no sync worker, nothing cached).
+
+Sign-in is PennKey SSO through Penn Labs' Platform, and access is currently
+limited to team leads — see [Authentication](#authentication).
 
 ## What's in the box
 
@@ -21,8 +24,11 @@ every page load (no database, no sync worker).
   least-privilege ClusterRole the backend would need.
 - **Sample fake deployments** so anyone can run the dashboard locally on
   `kind` without needing access to a real cloud cluster.
-- **Unit tests** that mock the K8s client and verify the API logic in
-  isolation.
+- **Penn Labs SSO** via `django-labs-accounts`, with authorization derived from
+  the product-admin permissions Platform already tracks — so "team leads only"
+  needs no separate list of pennkeys to maintain.
+- **Unit tests** that mock the K8s client and verify both the API logic and the
+  access-control rules in isolation.
 
 ## Architecture
 
@@ -30,14 +36,24 @@ every page load (no database, no sync worker).
 ┌──────────────┐         ┌────────────────┐         ┌─────────────────┐
 │  React SPA   │ ──HTTP─▶│  Django + DRF  │ ──HTTPS▶│  Kubernetes API │
 │ (port 3000)  │◀────────│  (port 8000)   │◀────────│   (live cluster)│
-└──────────────┘         └────────────────┘         └─────────────────┘
-       browser                  no DB              EKS / kind / minikube
+└──────────────┘         └───────┬────────┘         └─────────────────┘
+       browser                   │                  EKS / kind / minikube
+                                 │ OAuth2 + introspection
+                                 ▼
+                       ┌──────────────────────┐
+                       │ platform.pennlabs.org│
+                       │  (PennKey identity)  │
+                       └──────────────────────┘
 ```
 
-There is **no database**. Every API call from the frontend translates into a
-fresh request to the Kubernetes API. The label
+**No deployment data is ever persisted.** Every API call from the frontend
+translates into a fresh request to the Kubernetes API. The label
 `app.kubernetes.io/managed-by=kittyhawk` is used as the discovery filter so
 the dashboard only surfaces Penn Labs–managed resources, not system pods.
+
+There *is* a small SQLite database, but only for authentication — Django's
+user/session tables plus the OAuth token tables. See
+[Authentication](#authentication).
 
 ## DevOps concepts demonstrated
 
@@ -47,6 +63,7 @@ the dashboard only surfaces Penn Labs–managed resources, not system pods.
 | **Orchestration**          | `k8s/main.ts` — Kubernetes Deployments + Services + Ingress              |
 | **Infrastructure as Code** | CDK8s in TypeScript synthesizes raw K8s YAML                             |
 | **RBAC / least privilege** | `k8s/rbac.yaml` — narrowly-scoped ClusterRole                            |
+| **SSO / authorization**    | Penn Labs OAuth2 via `django-labs-accounts`; access limited to team leads (`deployments/backends.py`, `deployments/permissions.py`) |
 | **Reproducibility**        | `uv.lock` pins every transitive dep; pinned base images; `docker compose up` produces the same env everywhere |
 | **Portability**            | Same image runs locally (kind), in EKS, or any K8s cluster               |
 | **Testability**            | `backend/deployments/tests.py` with mocked K8s client                    |
@@ -86,6 +103,7 @@ kubectl apply -f k8s/sample-deployments.yaml
 # 3. Backend
 cd backend
 uv sync                                   # creates .venv from uv.lock
+uv run python manage.py migrate           # creates the auth database
 uv run python manage.py runserver &
 cd ..
 
@@ -95,10 +113,18 @@ npm install
 npm start
 ```
 
-Open <http://localhost:3000>. You should see three product cards:
+Or just `./dev.sh`, which does all of the above (including `migrate`) and
+prints which cluster it's about to read.
+
+Open <http://localhost:3000> — always port 3000, never 8000 directly, because
+the dev server proxies `/api` through to Django to keep the OAuth flow
+same-origin. Sign in with your PennKey, and you should see three product cards:
 `penn-clubs` (green), `ohq` (green), `penn-courses` (red — the broken one,
 demonstrating the degraded-health UI). Click in to see pods and ReplicaSet
 history.
+
+If you get "You don't have access yet", your Penn Labs account isn't a team
+lead — see [Authentication](#authentication).
 
 ## Quick start (alternative: docker-compose)
 
@@ -117,15 +143,114 @@ docker compose up --build
 ```bash
 cd backend
 uv run python manage.py test
-# Ran 8 tests in 0.005s — OK
+# Ran 23 tests in 0.038s — OK
 ```
 
 `uv run` syncs the environment against `uv.lock` before executing, so you
 never run tests against a stale set of packages.
 
 The tests mock the Kubernetes client entirely, so they don't need a cluster.
-They verify view logic: label-based product grouping, dict shaping for the
-JSON API, 404 handling, and rollback input validation.
+They verify view logic (label-based product grouping, dict shaping for the JSON
+API, 404 handling, rollback input validation) and access control: that anonymous
+users and signed-in non-leads are refused, that a rollback is rejected *before*
+the cluster is touched, and that the mapping from Platform permissions to lead
+status grants and revokes correctly.
+
+## Authentication
+
+Sign-in is Penn Labs SSO, via [`django-labs-accounts`][dla] (DLA) — the same
+client library Penn Clubs, OHQ and Penn Mobile use. **Access is currently
+limited to team leads.**
+
+### The flow
+
+```
+browser                    this app                     platform.pennlabs.org
+   │                          │                                   │
+   │ GET /api/accounts/login/ │                                   │
+   ├─────────────────────────▶│                                   │
+   │◀──── 302 ────────────────┤   /accounts/authorize/            │
+   ├──────────────────────────────────────────────────────────────▶│
+   │                          │           (PennKey / Shibboleth)  │
+   │◀──── 302 back to /api/accounts/callback/?code=… ─────────────┤
+   ├─────────────────────────▶│  exchange code at /accounts/token/│
+   │                          ├──────────────────────────────────▶│
+   │                          │  POST /accounts/introspect/       │
+   │                          ├──────────────────────────────────▶│
+   │                          │◀─ user: pennkey, name, email,     │
+   │                          │       groups, user_permissions ───┤
+   │◀──── 302 to / (session cookie set) ──────────────────────────┤
+```
+
+DLA's views are mounted at **`/api/accounts/`** rather than `/accounts/`. That's
+deliberate: the production ingress already routes `/api` to Django (see
+`k8s/main.ts`), so no extra ingress rule is needed, and `/api/accounts/callback/`
+is the exact path Penn Labs' shared development OAuth client is registered
+against.
+
+### Who counts as a team lead
+
+We don't keep our own list of pennkeys. Penn Labs already tracks this, and we
+read it:
+
+1. [`pennlabs/infrastructure`][infra]`/docker/team-sync` runs on a cron. Every
+   GitHub team in the org whose slug ends in **`-leads`** is a lead team, and
+   `<x>-leads` maps to the permission codename `<x>_admin` (dashes become
+   underscores) — so `penn-clubs-leads` yields `penn_clubs_admin`. Members of
+   the **`Directors`** team receive every such codename.
+2. team-sync POSTs `{pennkey: [codenames]}` to Platform's
+   `/accounts/productadmin/`, which materializes them as Django permissions.
+3. Platform reports them back to us in the `user_permissions` field of the
+   introspection response.
+
+Because step 1 only ever issues `*_admin` codenames to lead teams and to
+Directors, **"holds at least one `*_admin` permission" is exactly equivalent to
+"is a lead of some team, or a Director"**, and that is the whole rule
+(`deployments/backends.py`). It needs no new GitHub team and no change to
+Platform. Lead status is re-evaluated on **every** login, so someone who rotates
+off a team loses access next time they sign in; `SESSION_COOKIE_AGE` (12h) bounds
+how long an already-issued session outlives the change.
+
+Enforcement is server-side: `IsTeamLead` is the project-wide default DRF
+permission, so every endpoint is closed unless it explicitly opts out. Only
+`/api/health/` (liveness probes) and `/api/me/` (so the SPA can discover whether
+you're signed in) are public. `AuthGate.tsx` is a UX layer on top, not the
+boundary.
+
+### Widening access later
+
+Create a `dashboard-leads` team in the GitHub org. team-sync will start issuing
+`dashboard_admin`, which the existing check already matches — no code change.
+
+### Local development
+
+Logging in locally does a real OAuth round-trip against
+`platform-dev.pennlabs.org` using Penn Labs' shared development client
+(configured in `dashboard/settings/development.py`). There is no auth-bypass
+switch, so you need network access and a Penn Labs account on platform-dev.
+
+### Before this can run in production
+
+⚠️ **Someone on Platform must register the OAuth client.** This is the one step
+that cannot be done from this repo:
+
+- register `https://dashboard.pennlabs.org/api/accounts/callback/` as a redirect
+  URI, with scopes `read` and `introspection`
+- put the issued credentials in Vault as `LABS_CLIENT_ID` / `LABS_CLIENT_SECRET`
+  in the `dashboard` secret, alongside a `SECRET_KEY`
+
+`dashboard.settings.production` refuses to start without `SECRET_KEY`, since it
+signs session cookies.
+
+Note the backend runs a **single replica** (`k8s/main.ts`). Auth state lives in a
+SQLite file inside the container, so a session minted on one pod would mean
+nothing on another. The file is ephemeral by design — Platform is the source of
+truth for identity and lead status, so a pod restart just means users silently
+re-authenticate through their existing SSO session. Moving to Postgres is what
+would let the API scale out again.
+
+[dla]: https://github.com/pennlabs/django-labs-accounts
+[infra]: https://github.com/pennlabs/infrastructure
 
 ## Project structure
 
@@ -137,23 +262,26 @@ backend/
 ├── manage.py
 ├── dashboard/                       # Django project
 │   ├── settings/
-│   │   ├── base.py                  # shared, no DB, no auth
-│   │   ├── development.py           # local: ~/.kube/config, AllowAny
-│   │   └── production.py            # in-cluster: ServiceAccount token
-│   └── urls.py
+│   │   ├── base.py                  # shared; SQLite for auth only, DLA config
+│   │   ├── development.py           # local: ~/.kube/config, platform-dev OAuth
+│   │   └── production.py            # in-cluster: ServiceAccount token, real OAuth
+│   └── urls.py                      # mounts DLA at /api/accounts/
 └── deployments/                     # the actual app
     ├── k8s_client.py                # all calls to the K8s API live here
+    ├── backends.py                  # auth backend: who counts as a team lead
+    ├── permissions.py               # IsTeamLead — the project-wide default
     ├── views.py                     # thin DRF views, no business logic
     ├── urls.py                      # routes keyed by (namespace, name)
     └── tests.py                     # unit tests with mocked K8s client
 
 frontend/
-├── Dockerfile                       # node build → nginx serve
+├── Dockerfile                       # node build → nginx serve (also proxies /api)
 └── src/
-    ├── api/                         # fetch wrappers
-    ├── hooks/                       # React Query hooks (auto-refetch)
+    ├── setupProxy.js                # dev-only: /api → Django, keeps OAuth same-origin
+    ├── api/                         # fetch wrappers (+ CSRF header)
+    ├── hooks/                       # React Query hooks (auto-refetch), useAuth
     ├── pages/                       # Dashboard, ProductDetail, DeploymentDetail
-    ├── components/                  # HealthBadge, PodStatusList, RollbackDialog, ...
+    ├── components/                  # AuthGate, HealthBadge, PodStatusList, ...
     └── types/                       # TypeScript shapes mirroring the API
 
 k8s/
@@ -225,9 +353,13 @@ steps:
 - **Deployment history** — would require adding a small database back, since
   the K8s API doesn't retain deploy events beyond the lifetime of the
   ReplicaSets that produced them (typically ~10 revisions).
-- **Production OAuth** — `django-labs-accounts` integration was dropped for
-  the local-only demo. Production deployment would re-enable it for access
-  control.
+- **Postgres instead of SQLite** — auth state currently lives in a SQLite file
+  inside the container, which is why the API runs a single replica. Swapping in
+  Postgres (via `DATABASE_URL`, the way Platform and Penn Clubs do it) would let
+  it scale out again. See [Authentication](#authentication).
+- **Wider access than team leads** — the dashboard is deliberately restricted to
+  leads for now. A `dashboard-leads` GitHub team would widen it without a code
+  change.
 - **Alerts** — turn the polling-based dashboard into push-based notifications
   when a deployment becomes unhealthy.
 - **Multi-cluster support** — currently the backend reads one kubeconfig

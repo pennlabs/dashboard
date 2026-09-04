@@ -3,12 +3,18 @@
 Every endpoint reads live from the Kubernetes API; nothing is persisted. This
 module is intentionally thin -- the heavy lifting (label filtering, owner
 reference walking, dict shaping) lives in `k8s_client`.
+
+Access control: `IsTeamLead` is the project-wide default permission (see
+settings/base.py), so views here are closed to everyone but Penn Labs team leads
+unless they explicitly opt out with `@permission_classes([AllowAny])`. Only
+`health_check` and `me` do.
 """
 
 from collections import defaultdict
 from typing import Any
 
 from django.http import JsonResponse
+from django.views.decorators.csrf import ensure_csrf_cookie
 from kubernetes.client.exceptions import ApiException
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -44,6 +50,35 @@ def _build_products(deployments: list[Any]) -> dict[str, dict]:
 def health_check(_request):
     """Liveness probe -- intentionally does not call the K8s API."""
     return JsonResponse({"status": "ok"})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+# Seeds the csrftoken cookie. The SPA calls this on load, which is what makes the
+# X-CSRFToken header available later for the rollback POST.
+@ensure_csrf_cookie
+def me(request):
+    """Who is viewing, and may they use the dashboard?
+
+    Deliberately public and always 200: the SPA calls this precisely to discover
+    whether anyone is signed in, and it needs to tell "not signed in" apart from
+    "signed in but not a team lead" so it can show the right screen.
+    """
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"authenticated": False, "is_lead": False, "user": None})
+    return Response(
+        {
+            "authenticated": True,
+            "is_lead": user.is_staff,
+            "user": {
+                "pennkey": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+            },
+        }
+    )
 
 
 @api_view(["GET"])
@@ -91,9 +126,9 @@ def deployment_pods(_request, namespace: str, name: str):
 def rollback_deployment(request, namespace: str, name: str):
     """Patch the deployment's container image to a previous revision.
 
-    For a real production deployment we would gate this with admin auth; for
-    the local demo it's open. The `image` field in the request body is
-    typically copied from one of the older entries in `replicasets`.
+    Restricted to team leads by the default `IsTeamLead` permission. The `image`
+    field in the request body is typically copied from one of the older entries
+    in `replicasets`.
     """
     image = request.data.get("image")
     if not image:

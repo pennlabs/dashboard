@@ -5,9 +5,17 @@ description = "Django + DRF API that reads live deployment state from the Kubern
 requires-python = ">=3.13"
 
 dependencies = [
-    # Django + REST framework -- the API layer.
-    "django==4.2.*",
-    "djangorestframework==3.15.*",
+    # Django + REST framework -- the API layer. Django is held at 5.2 because
+    # django-labs-accounts requires >=5.0.2,<6.0; DRF 3.16 is the first release
+    # that supports Django 5.2.
+    "django==5.2.*",
+    "djangorestframework==3.16.*",
+
+    # Penn Labs OAuth2 client ("DLA"). Provides the `accounts` app: the
+    # login/callback/logout views that redirect through platform.pennlabs.org,
+    # and LabsUserBackend, which turns platform's introspection response into a
+    # local User. See deployments/backends.py for our team-lead subclass.
+    "django-labs-accounts==1.0.6",
 
     # Allow the React dev server (localhost:3000) to call the API (localhost:8000).
     "django-cors-headers==4.*",

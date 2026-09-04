@@ -66,8 +66,8 @@ if [ "$RUN_BACKEND" = 1 ];  then check_port "$BACKEND_PORT" BACKEND; fi
 if [ "$RUN_FRONTEND" = 1 ]; then check_port "$FRONTEND_PORT" FRONTEND; fi
 
 # Show which cluster we're about to read. This is the one thing worth seeing
-# every single time: dev settings point at your *current* kubectl context, and
-# the rollback endpoint is unauthenticated.
+# every single time: dev settings point at your *current* kubectl context, so
+# the rollback button really does patch whatever cluster is named below.
 if [ "$RUN_BACKEND" = 1 ]; then
   if ! command -v kubectl >/dev/null 2>&1; then
     warn "kubectl not found — skipping cluster preflight"
@@ -84,6 +84,7 @@ if [ "$RUN_BACKEND" = 1 ]; then
     echo
     echo "  ${BOLD}cluster${RESET}  ${CYAN}${ctx}${RESET}"
     echo "  ${BOLD}visible${RESET}  ${n_deploys} kittyhawk-labeled deployments"
+    echo "  ${BOLD}sign-in${RESET}  PennKey via platform-dev.pennlabs.org (team leads only)"
     case "$ctx" in
       *prod*) echo "  ${BOLD}${YELLOW}note${RESET}     live production — the rollback button really patches Deployments" ;;
     esac
@@ -132,6 +133,9 @@ if [ "$RUN_BACKEND" = 1 ]; then
     cd "$ROOT/backend"
     # Unset so a stray conda/venv activation doesn't make `uv run` warn.
     unset VIRTUAL_ENV
+    # Creates db.sqlite3 on first run. It holds only auth state (users,
+    # sessions, OAuth tokens) -- deployment data is always read live from K8s.
+    uv run python manage.py migrate --noinput >/dev/null
     exec uv run python manage.py runserver "127.0.0.1:${BACKEND_PORT}" 2>&1
   ) | prefix "${BLUE}[api]${RESET}" &
   PIDS="$PIDS $!"
@@ -153,7 +157,15 @@ if [ "$RUN_FRONTEND" = 1 ]; then
   (
     cd "$ROOT/frontend"
     export PORT="$FRONTEND_PORT"
-    export REACT_APP_API_BASE_URL="http://localhost:${BACKEND_PORT}"
+    # No REACT_APP_API_BASE_URL: the dev server proxies /api through to the
+    # backend (frontend/src/setupProxy.js), which keeps every request
+    # same-origin. OAuth needs that -- the browser has to navigate to
+    # /api/accounts/login/ and come back to /api/accounts/callback/ on this
+    # same origin for the session and CSRF cookies to survive the round-trip.
+    #
+    # 127.0.0.1, not localhost, to match how the backend binds above: Node
+    # resolves "localhost" to ::1 first, which nothing is listening on.
+    export API_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}"
     export BROWSER="${BROWSER:-none}"
     exec npm start 2>&1
   ) | prefix "${CYAN}[web]${RESET}" &
