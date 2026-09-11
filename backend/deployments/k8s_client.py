@@ -74,6 +74,29 @@ def version(obj: Any) -> str:
     return _label(obj, VERSION_LABEL)
 
 
+def image_tag(image: str) -> str:
+    """The tag portion of a container image reference, or "" if untagged.
+
+    Kittyhawk tags every image with the deploying commit
+    (`pennlabs/penn-clubs-backend:c196b603...`), so for anything it manages the
+    tag *is* the git SHA. This is the only place a ReplicaSet's version can be
+    recovered from -- see `replicaset_to_dict`.
+
+    Splits on the last colon, but only after the last slash, so that a registry
+    host with a port (`registry:5000/img`) isn't mistaken for a tag.
+    """
+    repo, _, tag = image.rpartition(":")
+    if not repo or "/" in tag:
+        return ""
+    return tag
+
+
+def image_repository(image: str) -> str:
+    """Everything before the tag, e.g. `pennlabs/penn-clubs-backend`."""
+    tag = image_tag(image)
+    return image[: -(len(tag) + 1)] if tag else image
+
+
 # ---------------------------------------------------------------------------
 # Deployments
 # ---------------------------------------------------------------------------
@@ -117,14 +140,22 @@ def deployment_to_dict(dep: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def get_replicasets(namespace: str, deployment_name: str) -> list[Any]:
-    """ReplicaSets owned by a given Deployment.
+    """ReplicaSets owned by a given Deployment, newest revision first.
 
-    A Deployment doesn't directly link its history; you have to look at every
-    ReplicaSet in the namespace and find ones whose `ownerReferences` point at
+    A Deployment doesn't directly link its history; you have to look at the
+    ReplicaSets in the namespace and find ones whose `ownerReferences` point at
     the Deployment. Newer ReplicaSets have higher `revision` annotations.
+
+    NOTE on the selector: we filter on `app.kubernetes.io/name`, NOT on
+    `managed-by=kittyhawk` like the Deployment listing does. A ReplicaSet
+    inherits its labels from the Deployment's *pod template*, not from the
+    Deployment's own metadata -- and Kittyhawk only puts
+    `app.kubernetes.io/name` on the pod template. Selecting on `managed-by`
+    here matches literally zero ReplicaSets in the real cluster, which silently
+    emptied the rollout history and made the rollback UI unreachable.
     """
     all_rs = _apps().list_namespaced_replica_set(
-        namespace, label_selector=MANAGED_BY_LABEL
+        namespace, label_selector=f"{NAME_LABEL}={deployment_name}"
     ).items
     owned = []
     for rs in all_rs:
@@ -154,7 +185,11 @@ def replicaset_to_dict(rs: Any) -> dict[str, Any]:
     image = containers[0].image if containers else ""
     return {
         "revision": revision,
-        "version": version(rs),
+        # Fall back to the image tag: Kittyhawk keeps the version label on the
+        # Deployment, not the pod template, so a ReplicaSet almost never carries
+        # one and this field was always "" (rendering every history row as "—").
+        # The tag is the deploying commit, which is the same value.
+        "version": version(rs) or image_tag(image),
         "image": image,
         "created_at": (
             rs.metadata.creation_timestamp.isoformat()
@@ -211,23 +246,81 @@ def pod_to_dict(pod: Any) -> dict[str, Any]:
 # Rollback
 # ---------------------------------------------------------------------------
 
-def rollback_deployment(namespace: str, name: str, image: str) -> None:
-    """Patch the Deployment's first container image.
+class InvalidRollbackTarget(ValueError):
+    """The requested image is not a previous revision of this Deployment."""
 
-    Patching the spec is exactly what `kubectl set image` does. The Deployment
-    controller then creates a new ReplicaSet matching the new spec and scales
-    down the old one -- the standard rolling update mechanism.
+
+def rollback_deployment(namespace: str, name: str, image: str) -> None:
+    """Roll a Deployment back to a previously-deployed image.
+
+    Patching the pod template is exactly what `kubectl set image` does: the
+    Deployment controller then creates a new ReplicaSet matching the new spec
+    and scales down the old one -- the standard rolling update mechanism.
+
+    Two things this deliberately does beyond swapping the image:
+
+    1. It refuses any image that isn't already in this Deployment's own
+       ReplicaSet history. Without that check the endpoint accepts an arbitrary
+       string and patches it straight into the cluster, so any authorized user
+       could run any image in any namespace -- and the ClusterRole grants
+       `patch` on deployments cluster-wide. "Roll back" should mean going back
+       to something that actually ran here before, and the UI only ever offers
+       exactly those images.
+    2. It updates the `app.kubernetes.io/version` label to match. The dashboard
+       reads the *label* for "current version", so patching only the image left
+       the UI reporting the pre-rollback SHA while running the older code --
+       i.e. the rollback looked like it had done nothing.
+
+    Raises:
+        InvalidRollbackTarget: if `image` was never deployed here.
     """
     apps = _apps()
+
+    # Validate against history first, so a bad request never reaches the cluster.
+    history = get_replicasets(namespace, name)
+    known_images = {
+        rs.spec.template.spec.containers[0].image
+        for rs in history
+        if rs.spec and rs.spec.template and rs.spec.template.spec.containers
+    }
+    if image not in known_images:
+        raise InvalidRollbackTarget(
+            f"{image!r} is not a previous revision of {namespace}/{name}"
+        )
+
     deployment = apps.read_namespaced_deployment(name=name, namespace=namespace)
-    container_name = deployment.spec.template.spec.containers[0].name
-    patch = {
+    containers = deployment.spec.template.spec.containers or []
+    if not containers:
+        raise InvalidRollbackTarget(f"{namespace}/{name} has no containers to patch")
+
+    # With one container (every Kittyhawk app) there's no ambiguity. With a
+    # sidecar, pick the container already running the same image repository
+    # rather than blindly taking the first one, which could point a sidecar at
+    # the app's image.
+    if len(containers) == 1:
+        target = containers[0]
+    else:
+        repo = image_repository(image)
+        matches = [c for c in containers if image_repository(c.image) == repo]
+        if len(matches) != 1:
+            raise InvalidRollbackTarget(
+                f"cannot tell which container of {namespace}/{name} to roll back "
+                f"to {image!r}"
+            )
+        target = matches[0]
+
+    patch: dict[str, Any] = {
         "spec": {
             "template": {
-                "spec": {
-                    "containers": [{"name": container_name, "image": image}]
-                }
+                "spec": {"containers": [{"name": target.name, "image": image}]}
             }
         }
     }
+
+    # Keep the version label in step with the image actually running. Only when
+    # the tag looks like a version -- never write an empty label.
+    tag = image_tag(image)
+    if tag:
+        patch["metadata"] = {"labels": {VERSION_LABEL: tag}}
+
     apps.patch_namespaced_deployment(name=name, namespace=namespace, body=patch)

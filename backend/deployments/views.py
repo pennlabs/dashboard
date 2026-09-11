@@ -135,6 +135,10 @@ def rollback_deployment(request, namespace: str, name: str):
         return Response({"error": "image is required"}, status=400)
     try:
         k8s_client.rollback_deployment(namespace, name, image)
+    except k8s_client.InvalidRollbackTarget as exc:
+        # Client error, not a server fault: the image isn't in this Deployment's
+        # history. Never let an arbitrary image reach the cluster.
+        return Response({"error": str(exc)}, status=400)
     except ApiException as exc:
         return Response({"error": str(exc)}, status=exc.status or 500)
     return Response({"status": "rollback triggered", "image": image})

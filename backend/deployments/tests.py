@@ -11,9 +11,10 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from kubernetes.client.exceptions import ApiException
 
+from deployments import k8s_client
 from deployments.backends import DashboardUserBackend
 
 
@@ -322,3 +323,258 @@ class DashboardUserBackendTest(TestCase):
         )
         user.refresh_from_db()
         self.assertTrue(user.is_staff)
+
+
+def _fake_replicaset(revision, image, name="rs", deployment="clubs-backend", labels=None):
+    """A ReplicaSet shaped like the real thing.
+
+    Note the labels: a ReplicaSet inherits the Deployment's *pod template*
+    labels, and Kittyhawk only puts `app.kubernetes.io/name` there. Fixtures
+    that also add `managed-by` here do not reflect the real cluster.
+    """
+    return SimpleNamespace(
+        metadata=SimpleNamespace(
+            name=name,
+            annotations={"deployment.kubernetes.io/revision": str(revision)},
+            labels=labels if labels is not None else {"app.kubernetes.io/name": deployment},
+            creation_timestamp=None,
+            owner_references=[SimpleNamespace(kind="Deployment", name=deployment)],
+        ),
+        spec=SimpleNamespace(
+            template=SimpleNamespace(
+                spec=SimpleNamespace(containers=[SimpleNamespace(name="worker", image=image)])
+            )
+        ),
+    )
+
+
+def _fake_live_deployment(containers):
+    return SimpleNamespace(
+        metadata=SimpleNamespace(name="clubs-backend", namespace="default", labels={}),
+        spec=SimpleNamespace(
+            template=SimpleNamespace(spec=SimpleNamespace(containers=containers))
+        ),
+    )
+
+
+class ImageTagTest(SimpleTestCase):
+    """Kittyhawk tags images with the deploying commit, so tag == version."""
+
+    def test_extracts_tag(self):
+        self.assertEqual(k8s_client.image_tag("pennlabs/clubs:abc123"), "abc123")
+
+    def test_untagged_image_has_no_tag(self):
+        self.assertEqual(k8s_client.image_tag("pennlabs/clubs"), "")
+
+    def test_registry_port_is_not_mistaken_for_a_tag(self):
+        # The colon here belongs to the registry host, not a tag.
+        self.assertEqual(k8s_client.image_tag("registry:5000/pennlabs/clubs"), "")
+
+    def test_repository_strips_the_tag(self):
+        self.assertEqual(
+            k8s_client.image_repository("pennlabs/clubs:abc123"), "pennlabs/clubs"
+        )
+
+    def test_repository_of_untagged_image_is_itself(self):
+        self.assertEqual(
+            k8s_client.image_repository("pennlabs/clubs"), "pennlabs/clubs"
+        )
+
+
+class GetReplicaSetsTest(SimpleTestCase):
+    """Regression tests for the selector that broke rollout history."""
+
+    @mock.patch("deployments.k8s_client._apps")
+    def test_selects_on_name_label_not_managed_by(self, mock_apps):
+        # `managed-by` is on the Deployment, never on the pod template, so it
+        # matches zero ReplicaSets in a real cluster. Selecting on it emptied
+        # the history and made the rollback UI unreachable.
+        mock_apps.return_value.list_namespaced_replica_set.return_value = (
+            SimpleNamespace(items=[])
+        )
+
+        k8s_client.get_replicasets("default", "clubs-backend")
+
+        _, kwargs = mock_apps.return_value.list_namespaced_replica_set.call_args
+        self.assertEqual(
+            kwargs["label_selector"], "app.kubernetes.io/name=clubs-backend"
+        )
+        self.assertNotIn("managed-by", kwargs["label_selector"])
+
+    @mock.patch("deployments.k8s_client._apps")
+    def test_finds_replicasets_with_realistic_labels(self, mock_apps):
+        # Exactly the labels a real ReplicaSet carries -- no managed-by.
+        rs = _fake_replicaset(
+            2,
+            "pennlabs/clubs:new",
+            labels={
+                "app.kubernetes.io/name": "clubs-backend",
+                "pod-template-hash": "abc123",
+            },
+        )
+        mock_apps.return_value.list_namespaced_replica_set.return_value = (
+            SimpleNamespace(items=[rs])
+        )
+
+        found = k8s_client.get_replicasets("default", "clubs-backend")
+
+        self.assertEqual(len(found), 1)
+
+    @mock.patch("deployments.k8s_client._apps")
+    def test_ignores_replicasets_owned_by_another_deployment(self, mock_apps):
+        mine = _fake_replicaset(1, "pennlabs/clubs:a", name="mine")
+        theirs = _fake_replicaset(1, "pennlabs/other:b", name="theirs", deployment="other")
+        mock_apps.return_value.list_namespaced_replica_set.return_value = (
+            SimpleNamespace(items=[mine, theirs])
+        )
+
+        found = k8s_client.get_replicasets("default", "clubs-backend")
+
+        self.assertEqual([rs.metadata.name for rs in found], ["mine"])
+
+    @mock.patch("deployments.k8s_client._apps")
+    def test_sorted_newest_revision_first(self, mock_apps):
+        mock_apps.return_value.list_namespaced_replica_set.return_value = (
+            SimpleNamespace(
+                items=[
+                    _fake_replicaset(1, "pennlabs/clubs:old", name="old"),
+                    _fake_replicaset(3, "pennlabs/clubs:new", name="new"),
+                    _fake_replicaset(2, "pennlabs/clubs:mid", name="mid"),
+                ]
+            )
+        )
+
+        found = k8s_client.get_replicasets("default", "clubs-backend")
+
+        self.assertEqual([rs.metadata.name for rs in found], ["new", "mid", "old"])
+
+
+class ReplicaSetToDictTest(SimpleTestCase):
+    def test_version_falls_back_to_image_tag(self):
+        # No version label, which is the normal case in production.
+        rs = _fake_replicaset(4, "pennlabs/clubs:c196b603")
+
+        self.assertEqual(k8s_client.replicaset_to_dict(rs)["version"], "c196b603")
+
+    def test_version_label_wins_when_present(self):
+        rs = _fake_replicaset(
+            4,
+            "pennlabs/clubs:tagsha",
+            labels={"app.kubernetes.io/version": "labelsha"},
+        )
+
+        self.assertEqual(k8s_client.replicaset_to_dict(rs)["version"], "labelsha")
+
+
+class RollbackDeploymentTest(SimpleTestCase):
+    """Tests the real rollback_deployment body, which had no coverage at all.
+
+    Every other rollback test mocks this function out, so nothing exercised the
+    patch it builds.
+    """
+
+    def setUp(self):
+        self.history = [
+            _fake_replicaset(3, "pennlabs/clubs:current", name="rs3"),
+            _fake_replicaset(2, "pennlabs/clubs:previous", name="rs2"),
+        ]
+
+    def _run(self, image, containers=None, history=None):
+        containers = containers or [SimpleNamespace(name="worker", image="pennlabs/clubs:current")]
+        with mock.patch("deployments.k8s_client._apps") as mock_apps, mock.patch(
+            "deployments.k8s_client.get_replicasets",
+            return_value=self.history if history is None else history,
+        ):
+            mock_apps.return_value.read_namespaced_deployment.return_value = (
+                _fake_live_deployment(containers)
+            )
+            k8s_client.rollback_deployment("default", "clubs-backend", image)
+            return mock_apps.return_value.patch_namespaced_deployment
+
+    def test_patches_the_container_image(self):
+        patch = self._run("pennlabs/clubs:previous")
+
+        body = patch.call_args.kwargs["body"]
+        container = body["spec"]["template"]["spec"]["containers"][0]
+        self.assertEqual(container["name"], "worker")
+        self.assertEqual(container["image"], "pennlabs/clubs:previous")
+
+    def test_also_updates_the_version_label(self):
+        # The dashboard reads current_version from this label. Patching only the
+        # image left the UI showing the pre-rollback SHA -- the rollback looked
+        # like a no-op even though the older image was running.
+        patch = self._run("pennlabs/clubs:previous")
+
+        body = patch.call_args.kwargs["body"]
+        self.assertEqual(
+            body["metadata"]["labels"]["app.kubernetes.io/version"], "previous"
+        )
+
+    def test_no_version_label_written_for_untagged_image(self):
+        history = [_fake_replicaset(2, "pennlabs/clubs", name="rs2")]
+
+        patch = self._run("pennlabs/clubs", history=history)
+
+        self.assertNotIn("metadata", patch.call_args.kwargs["body"])
+
+    def test_rejects_image_not_in_history(self):
+        # The security-relevant case: an arbitrary image must never be patched
+        # into the cluster, since the ClusterRole allows patching any Deployment.
+        with self.assertRaises(k8s_client.InvalidRollbackTarget):
+            self._run("attacker/evil:latest")
+
+    def test_rejects_image_without_touching_the_cluster(self):
+        with mock.patch("deployments.k8s_client._apps") as mock_apps, mock.patch(
+            "deployments.k8s_client.get_replicasets", return_value=self.history
+        ):
+            with self.assertRaises(k8s_client.InvalidRollbackTarget):
+                k8s_client.rollback_deployment(
+                    "default", "clubs-backend", "attacker/evil:latest"
+                )
+            mock_apps.return_value.patch_namespaced_deployment.assert_not_called()
+
+    def test_rolling_back_to_the_current_image_is_allowed(self):
+        # It's in history and harmless -- a no-op redeploy, not an error.
+        patch = self._run("pennlabs/clubs:current")
+
+        self.assertTrue(patch.called)
+
+    def test_picks_the_matching_container_when_a_sidecar_exists(self):
+        containers = [
+            SimpleNamespace(name="sidecar", image="datadog/agent:7"),
+            SimpleNamespace(name="worker", image="pennlabs/clubs:current"),
+        ]
+
+        patch = self._run("pennlabs/clubs:previous", containers=containers)
+
+        # Blindly taking containers[0] would have pointed the sidecar at the
+        # application image.
+        container = patch.call_args.kwargs["body"]["spec"]["template"]["spec"][
+            "containers"
+        ][0]
+        self.assertEqual(container["name"], "worker")
+
+    def test_refuses_when_the_target_container_is_ambiguous(self):
+        containers = [
+            SimpleNamespace(name="a", image="pennlabs/clubs:current"),
+            SimpleNamespace(name="b", image="pennlabs/clubs:current"),
+        ]
+
+        with self.assertRaises(k8s_client.InvalidRollbackTarget):
+            self._run("pennlabs/clubs:previous", containers=containers)
+
+
+class RollbackEndpointValidationTest(LeadClientMixin, TestCase):
+    def test_invalid_target_returns_400_not_500(self):
+        with mock.patch(
+            "deployments.k8s_client.rollback_deployment",
+            side_effect=k8s_client.InvalidRollbackTarget("nope"),
+        ):
+            response = self.client.post(
+                "/api/deployments/default/clubs-backend/rollback/",
+                data={"image": "attacker/evil:latest"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nope", response.json()["error"])
