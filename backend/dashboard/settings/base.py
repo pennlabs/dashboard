@@ -10,6 +10,7 @@ Notable points about this app's shape:
     `deployments/permissions.py` for how that is enforced.
 """
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -95,6 +96,27 @@ PLATFORM_ACCOUNTS = {
     # Leave Django's admin site alone; we don't install one.
     "CUSTOM_ADMIN": False,
 }
+
+# Pennkeys that always have access, on top of the team-lead rule above.
+#
+# Lead status is derived from permissions team-sync pushes to Platform, and that
+# pipeline only issues `*_admin` codenames to people who are BOTH a member of a
+# GitHub `<product>-leads` team AND listed in team-sync's roster.yaml. Anyone who
+# maintains this dashboard without leading a product team therefore has no
+# `*_admin` codename and would be locked out of the tool they operate.
+#
+# This is also the escape hatch for a Platform lead: Platform's own
+# ProductAdminView special-cases `platform_admin` and sets is_superuser instead
+# of materializing a Permission, so `platform_admin` never comes back from
+# introspection and the `*_admin` test cannot see it.
+#
+# Comma-separated env var so the list can change without a code deploy.
+# Matching is case-insensitive; team-sync lowercases pennkeys.
+DASHBOARD_ALLOWED_USERS = [
+    pennkey.strip().lower()
+    for pennkey in os.getenv("DASHBOARD_ALLOWED_USERS", "chenstan").split(",")
+    if pennkey.strip()
+]
 
 LOGIN_URL = "/api/accounts/login/"
 

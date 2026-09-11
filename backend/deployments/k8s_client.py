@@ -11,6 +11,7 @@ random system pods (kube-proxy, coredns, etc.).
 """
 
 import logging
+import re
 from typing import Any
 
 from django.conf import settings
@@ -95,6 +96,32 @@ def image_repository(image: str) -> str:
     """Everything before the tag, e.g. `pennlabs/penn-clubs-backend`."""
     tag = image_tag(image)
     return image[: -(len(tag) + 1)] if tag else image
+
+
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def looks_like_commit(tag: str) -> bool:
+    """Is this image tag plausibly a git commit SHA?
+
+    Only Kittyhawk-built product images are tagged with a commit. Plenty of
+    Deployments in the cluster run upstream images instead -- the per-product
+    Redis sidecars are tagged `6.0` and `6.2.6-v6`, for instance -- and those
+    Deployments still carry a real commit in their version label, because the
+    label describes the *release* that deployed them.
+
+    So a tag is only usable as a version when it looks like a SHA. Without this
+    check we would show `6.0` as a Redis Deployment's version (and link to
+    github.com/pennlabs/<product>/commit/6.0, a 404), and a rollback would
+    overwrite a perfectly good commit label with `6.0`.
+    """
+    return bool(_SHA_RE.match(tag))
+
+
+def _commit_from_image(image: str) -> str:
+    """The commit SHA an image was built from, or "" if its tag isn't one."""
+    tag = image_tag(image)
+    return tag if looks_like_commit(tag) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +215,10 @@ def replicaset_to_dict(rs: Any) -> dict[str, Any]:
         # Fall back to the image tag: Kittyhawk keeps the version label on the
         # Deployment, not the pod template, so a ReplicaSet almost never carries
         # one and this field was always "" (rendering every history row as "—").
-        # The tag is the deploying commit, which is the same value.
-        "version": version(rs) or image_tag(image),
+        # For product images the tag is the deploying commit. For upstream images
+        # (a Redis sidecar tagged `6.0`) it isn't a version at all, so leave it
+        # blank rather than render a link to a commit that doesn't exist.
+        "version": version(rs) or _commit_from_image(image),
         "image": image,
         "created_at": (
             rs.metadata.creation_timestamp.isoformat()
@@ -317,10 +346,14 @@ def rollback_deployment(namespace: str, name: str, image: str) -> None:
         }
     }
 
-    # Keep the version label in step with the image actually running. Only when
-    # the tag looks like a version -- never write an empty label.
-    tag = image_tag(image)
-    if tag:
-        patch["metadata"] = {"labels": {VERSION_LABEL: tag}}
+    # Keep the version label in step with the image actually running -- but only
+    # when the tag is actually a commit. Deployments running upstream images (the
+    # per-product Redis sidecars, tagged `6.0`) carry the *release's* commit in
+    # this label, so clobbering it with `6.0` would lose real information and
+    # point the UI's commit link at a SHA that doesn't exist. Leaving those
+    # labels untouched is strictly better than corrupting them.
+    commit = _commit_from_image(image)
+    if commit:
+        patch["metadata"] = {"labels": {VERSION_LABEL: commit}}
 
     apps.patch_namespaced_deployment(name=name, namespace=namespace, body=patch)

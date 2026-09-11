@@ -9,7 +9,15 @@ const BASE = process.env.REACT_APP_API_BASE_URL || ""
 /** Login and logout are full page navigations -- they redirect through Platform. */
 export const loginUrl = (next = "/") =>
   `${BASE}/api/accounts/login/?next=${encodeURIComponent(next)}`
-export const logoutUrl = (next = "/") =>
+
+/**
+ * Signing out drops our session but NOT the user's Platform SSO session, so the
+ * default lands on `/?logged_out=1`. AuthGate treats that marker as "do not
+ * auto-redirect to Platform" -- without it, signing out immediately bounces
+ * through Platform, gets silently re-authenticated, and sign-out is impossible.
+ * Override `next` only if you have handled that.
+ */
+export const logoutUrl = (next = "/?logged_out=1") =>
   `${BASE}/api/accounts/logout/?next=${encodeURIComponent(next)}`
 
 /** An API error that keeps its status code, so callers can single out a 403. */

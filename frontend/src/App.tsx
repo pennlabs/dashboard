@@ -20,7 +20,7 @@ function UserChip() {
   return (
     <span className="user-chip">
       {data.user.pennkey}
-      <a href={logoutUrl("/")}>Sign out</a>
+      <a href={logoutUrl()}>Sign out</a>
     </span>
   )
 }

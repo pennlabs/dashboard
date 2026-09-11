@@ -160,7 +160,17 @@ status grants and revokes correctly.
 
 Sign-in is Penn Labs SSO, via [`django-labs-accounts`][dla] (DLA) — the same
 client library Penn Clubs, OHQ and Penn Mobile use. **Access is currently
-limited to team leads.**
+limited to team leads**, plus any pennkey named in `DASHBOARD_ALLOWED_USERS`.
+
+Signing in is the **first** thing a visitor sees. Hitting `dashboard.pennlabs.org`
+with no session redirects straight to Platform rather than showing a "sign in"
+button, which is what Platform's own frontend does — `withAuth` in its
+`frontend/utils/auth.tsx` redirects to `/accounts/login/?next=…` the moment
+`/accounts/me/` comes back non-ok. Platform does that server-side in
+`getServerSideProps`; this app is a static bundle behind nginx, so `AuthGate.tsx`
+does the equivalent as soon as `/api/me/` answers. The one case that does *not*
+auto-redirect is a **failed** sign-in (`?auth_error=…`), which would otherwise
+loop — that renders an explanation and a manual "Try again".
 
 ### The flow
 
@@ -205,11 +215,31 @@ read it:
 
 Because step 1 only ever issues `*_admin` codenames to lead teams and to
 Directors, **"holds at least one `*_admin` permission" is exactly equivalent to
-"is a lead of some team, or a Director"**, and that is the whole rule
-(`deployments/backends.py`). It needs no new GitHub team and no change to
-Platform. Lead status is re-evaluated on **every** login, so someone who rotates
-off a team loses access next time they sign in; `SESSION_COOKIE_AGE` (12h) bounds
-how long an already-issued session outlives the change.
+"is a lead of some team, or a Director"** (`deployments/backends.py`). It needs no
+new GitHub team and no change to Platform. Lead status is re-evaluated on
+**every** login, so someone who rotates off a team loses access next time they
+sign in; `SESSION_COOKIE_AGE` (12h) bounds how long an already-issued session
+outlives the change.
+
+### Explicitly allowed pennkeys
+
+`DASHBOARD_ALLOWED_USERS` (in `dashboard/settings/base.py`, overridable as a
+comma-separated env var; defaults to `chenstan`) always has access, regardless of
+permissions. It is additive — it never removes the lead rule — and matching is
+case-insensitive. Two cases need it, and neither is a corner case:
+
+- **Whoever operates this dashboard without leading a product team.** Step 1 only
+  issues codenames to people who are *both* in a `*-leads` GitHub team *and*
+  listed in team-sync's `roster.yaml`, so a DevOps maintainer holds no `*_admin`
+  at all and would be locked out of the tool they run.
+- **A Platform lead.** Platform's `ProductAdminView` special-cases the
+  `platform_admin` slug: it sets `is_superuser` on the Platform-side user and
+  `continue`s *before* creating a `Permission`. So `platform_admin` never comes
+  back from introspection, and introspection doesn't expose `is_staff` /
+  `is_superuser` either (see Platform's `UserSerializer.Meta.fields`) — there is
+  nothing for the `*_admin` test to match. A Platform lead who leads no other
+  product is refused without this. Directors are unaffected, because team-sync
+  hands them every *other* product codename too.
 
 Enforcement is server-side: `IsTeamLead` is the project-wide default DRF
 permission, so every endpoint is closed unless it explicitly opts out. Only
