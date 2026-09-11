@@ -20,8 +20,8 @@ limited to team leads — see [Authentication](#authentication).
   nginx + 25 MB of static assets; the backend ships a resolved virtualenv
   with no package-manager caches or build tools.
 - **CDK8s / Kittyhawk manifests** describing how the dashboard would deploy
-  to a real cluster, plus a hand-written `rbac.yaml` showing the
-  least-privilege ClusterRole the backend would need.
+  to a real cluster, including the least-privilege ClusterRole the backend
+  needs to read the cluster.
 - **Sample fake deployments** so anyone can run the dashboard locally on
   `kind` without needing access to a real cloud cluster.
 - **Penn Labs SSO** via `django-labs-accounts`, with authorization derived from
@@ -62,7 +62,7 @@ user/session tables plus the OAuth token tables. See
 | **Containerization**       | `backend/Dockerfile`, `frontend/Dockerfile` (both multi-stage)           |
 | **Orchestration**          | `k8s/main.ts` — Kubernetes Deployments + Services + Ingress              |
 | **Infrastructure as Code** | CDK8s in TypeScript synthesizes raw K8s YAML                             |
-| **RBAC / least privilege** | `k8s/rbac.yaml` — narrowly-scoped ClusterRole                            |
+| **RBAC / least privilege** | `k8s/main.ts` — narrowly-scoped ClusterRole + bound ServiceAccount        |
 | **SSO / authorization**    | Penn Labs OAuth2 via `django-labs-accounts`; access limited to team leads (`deployments/backends.py`, `deployments/permissions.py`) |
 | **Reproducibility**        | `uv.lock` pins every transitive dep; pinned base images; `docker compose up` produces the same env everywhere |
 | **Portability**            | Same image runs locally (kind), in EKS, or any K8s cluster               |
@@ -287,7 +287,7 @@ frontend/
 k8s/
 ├── main.ts                          # CDK8s / Kittyhawk chart
 ├── package.json                     # `npm run build` synthesizes YAML to dist/
-├── rbac.yaml                        # ClusterRole + ClusterRoleBinding
+├── yarn.lock                        # pins cdk8s/constructs — CI needs this
 ├── sample-deployments.yaml          # fake services for local demos
 └── kind-cluster.yaml                # kind cluster config
 
@@ -310,36 +310,56 @@ The dashboard wouldn't exist without these conventions — they turn the cluster
 into a queryable database. Adding the dashboard cost zero changes to any
 existing service.
 
-## RBAC: the production deployment story
+## RBAC: least privilege in the cluster
 
-If this dashboard ran _inside_ the cluster (the original proposal), its
-backend pod would authenticate as a ServiceAccount, which by default has zero
-permissions. `k8s/rbac.yaml` shows the narrowest possible ClusterRole that
-makes the dashboard work:
+Running inside the cluster, the backend pod authenticates as a ServiceAccount,
+which by default has **zero** API permissions — without a role, every `list`
+call 403s and the dashboard renders empty. `k8s/main.ts` declares the narrowest
+ClusterRole that makes it work:
 
 - `get`, `list`, `watch` on **deployments** and **replicasets** (apps/v1)
 - `get`, `list`, `watch` on **pods** (core/v1)
 - `patch` on **deployments** only (the rollback button)
 
 No write access on pods or replicasets. No access to Secrets, ConfigMaps,
-Services, or anything else. A bug or an exploit in the dashboard cannot
-delete or modify any other workload in the cluster.
+Services, or anything else. A bug or an exploit in the dashboard cannot delete
+or modify any other workload in the cluster.
 
-For the course demo we run locally, so RBAC isn't applied to a live cluster
-— but the file is the deliverable that documents the access control story.
+Two details worth knowing:
+
+- The ServiceAccount, ClusterRole and ClusterRoleBinding are declared **in the
+  chart**, not as a separate hand-written YAML file, so CI applies them with
+  everything else. A standalone `rbac.yaml` would never be applied, since the
+  deploy step only applies `k8s/dist/`.
+- We do **not** use kittyhawk's `createServiceAccount: true`. It is broken —
+  `application/base.js` passes the account down as `serviceAccountName` (a
+  string) while `deployment.js` only emits that field when `props.serviceAccount`
+  (an object) is set, so it creates a ServiceAccount and never attaches it, and
+  the pod silently runs as `default`. It also annotates the account for IRSA,
+  which expects a matching IAM role; we don't need one, because this backend
+  calls the Kubernetes API, not any AWS API.
 
 ## Synthesizing the production manifests
 
 ```bash
 cd k8s
-npm install
-npm run build
+yarn install --frozen-lockfile
+RELEASE_NAME=dashboard GIT_SHA=$(git rev-parse HEAD) AWS_ACCOUNT_ID=<acct> yarn build
 # YAML appears in k8s/dist/
 ```
 
-Inspect `dist/dashboard.k8s.yaml` to see what would actually deploy. Combined
-with `rbac.yaml`, this is everything needed to ship the dashboard to a real
-cluster.
+All three environment variables are required. `RELEASE_NAME` in particular is
+not optional: kittyhawk reads it to set `app.kubernetes.io/part-of`, which names
+every resource and is what `kubectl apply --prune` selects on — omit it and you
+get `undefined_release-*` names. `GIT_SHA` becomes the image tag.
+
+Use **yarn**, not npm: `cdk8s` and `constructs` are pinned to exact versions with
+a `resolutions` block, because kittyhawk's own caret ranges otherwise resolve to
+newer copies that fail to compile against ours. `yarn.lock` is committed and CI
+installs with `--frozen-lockfile`.
+
+Inspect `dist/dashboard.k8s.yaml` to see exactly what deploys — 11 objects,
+including the ServiceAccount and RBAC.
 
 ## Limitations and future work
 

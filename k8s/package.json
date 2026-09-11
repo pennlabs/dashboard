@@ -5,13 +5,42 @@
   "scripts": {
     "build": "ts-node main.ts"
   },
+  "comments": {
+    "pinning": [
+      "cdk8s and constructs are pinned to EXACT versions on purpose.",
+      "@pennlabs/kittyhawk declares `cdk8s: ^2.2.59`, but caret-matching lets that",
+      "resolve to the newest 2.x, which serializes ApiObjects more strictly and",
+      "rejects kittyhawk's Container class with:",
+      "  Error: can't render non-simple object of type 'Container'",
+      "2.2.72 / 10.0.119 are the versions platform's own yarn.lock resolves, i.e.",
+      "the combination Penn Labs actually runs in production. Do not widen these",
+      "to ranges without re-running `yarn build` and checking dist/ is produced."
+    ]
+  },
   "dependencies": {
-    "@pennlabs/kittyhawk": "^1.1.11",
-    "cdk8s": "^2.0.0",
-    "constructs": "^10.0.0"
+    "@pennlabs/kittyhawk": "1.1.11",
+    "cdk8s": "2.2.72",
+    "constructs": "10.0.119"
+  },
+  "//resolutions": [
+    "Forces ONE copy of cdk8s and constructs across the whole tree. Without this,",
+    "yarn resolves kittyhawk's own `^2.2.59`/`^10.0.106` ranges separately and",
+    "installs nested copies (e.g. constructs 10.8.1), which are nominally distinct",
+    "TypeScript types -- so passing our Construct to kittyhawk fails to compile:",
+    "  Property 'with' is missing in type 'Construct' but required in type 'Construct'",
+    "`resolutions` is yarn (what CI uses); `overrides` is the npm equivalent."
+  ],
+  "resolutions": {
+    "cdk8s": "2.2.72",
+    "constructs": "10.0.119"
+  },
+  "overrides": {
+    "cdk8s": "2.2.72",
+    "constructs": "10.0.119"
   },
   "devDependencies": {
+    "@types/node": "^14.18.12",
     "ts-node": "^10.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^4.6.3"
   }
 }
