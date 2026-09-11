@@ -259,6 +259,22 @@ Logging in locally does a real OAuth round-trip against
 (configured in `dashboard/settings/development.py`). There is no auth-bypass
 switch, so you need network access and a Penn Labs account on platform-dev.
 
+⚠️ **Locally you are not yourself.** The shared development client authenticates
+everyone as platform-dev's shared test account — `engineering`
+(`engineering@upenn.edu`, pennid 1000) — not your own PennKey. Your real pennkey
+only comes back from *production* Platform. So an allowlist of real pennkeys can
+never match locally, and every local login would otherwise land on "You don't
+have access yet". `development.py` therefore appends `engineering` to
+`DASHBOARD_ALLOWED_USERS`. That module is never loaded in production, so the
+shared test account cannot reach the real dashboard.
+
+If a local login lands on "You don't have access yet", check which user you
+actually became before assuming the OAuth flow is broken:
+
+```bash
+cd backend && sqlite3 db.sqlite3 'SELECT id, username, is_staff FROM auth_user;'
+```
+
 ### Before this can run in production
 
 ⚠️ **Someone on Platform must register the OAuth client.** This is the one step

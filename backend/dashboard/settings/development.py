@@ -51,5 +51,21 @@ PLATFORM_ACCOUNTS = {
     "CUSTOM_ADMIN": False,
 }
 
+# Local sign-in lands you on platform-dev's shared test account, not your own
+# PennKey: the shared development OAuth client above authenticates everyone as
+# `engineering` (Engineering Student / engineering@upenn.edu, pennid 1000). Your
+# real pennkey only comes back from *production* Platform, so an allowlist of
+# real pennkeys can never match locally, and every local login would land on
+# "You don't have access yet".
+#
+# Adding it here rather than to base.py's default is the whole point: this module
+# is never loaded in production (DJANGO_SETTINGS_MODULE selects
+# dashboard.settings.production there), so a shared test account cannot be
+# granted access to the real dashboard by accident.
+#
+# `+ [...]` keeps whatever base.py resolved -- including anything set via the
+# DASHBOARD_ALLOWED_USERS env var -- so this only ever widens local access.
+DASHBOARD_ALLOWED_USERS = DASHBOARD_ALLOWED_USERS + ["engineering"]  # noqa: F405
+
 # False -> use ~/.kube/config; True -> use the in-cluster ServiceAccount token.
 K8S_IN_CLUSTER = False
