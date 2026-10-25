@@ -1,0 +1,149 @@
+# ========================================
+# Note:  If you make changes to this CI/CD, please include someone from DevOps in the list of reviewers for the PR.
+# ========================================
+#
+# Same shape as penn-clubs and penn-courses: the check jobs are inline, and
+# publishing and deploying use the shared pennlabs/shared-actions workflows, so
+# this repo ships exactly the way every other Penn Labs product does.
+#
+# The shared django.yaml / react.yaml checks aren't used because they assume
+# things this repo doesn't have: a `<project>.settings.ci` module, coverage and
+# flake8/black in the dev dependencies, and yarn `lint`/`test` scripts.
+#
+# Secrets: this repo is private, and org-level secrets don't reach private repos
+# on the free GitHub plan (see pennlabs/infrastructure docs/secrets/Github.md),
+# so DOCKER_USERNAME, DOCKER_PASSWORD, AWS_ACCOUNT_ID, GH_AWS_ACCESS_KEY_ID and
+# GH_AWS_SECRET_ACCESS_KEY must be set as repository secrets.
+name: Build and Deploy Dashboard
+
+on: push
+
+jobs:
+  # Backend
+  # ========================================================================================================
+
+  backend-check:
+    name: Backend Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same uv version and Python as backend/Dockerfile, so CI tests what ships.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.2"
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install Dependencies
+        # --frozen fails if uv.lock has drifted from pyproject.toml, as the image build does.
+        run: |-
+          cd backend
+          uv sync --frozen
+      - name: Django Checks
+        # Production settings are what the cluster loads, and they refuse to import
+        # without SECRET_KEY -- so check them explicitly, with a dummy value.
+        run: |-
+          cd backend
+          uv run python manage.py check
+          uv run python manage.py makemigrations --check --dry-run
+          SECRET_KEY=ci DJANGO_SETTINGS_MODULE=dashboard.settings.production uv run python manage.py check
+      - name: Test
+        # Development settings: the tests mock the Kubernetes API and Platform,
+        # so nothing here needs a cluster or network access.
+        run: |-
+          cd backend
+          uv run python manage.py test
+
+  publish-backend:
+    uses: pennlabs/shared-actions/.github/workflows/docker-publish.yaml@v0.1.10
+    with:
+      imageName: "dashboard-backend"
+      githubRef: ${{ github.ref }}
+      gitSha: ${{ github.sha }}
+      path: backend
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+    needs: backend-check
+
+  # Frontend
+  # ========================================================================================================
+
+  frontend-check:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Node 20, matching the build stage of frontend/Dockerfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Dependencies
+        run: |-
+          cd frontend
+          npm ci
+      - name: Typecheck
+        run: |-
+          cd frontend
+          npx tsc --noEmit
+      - name: Build
+        # GitHub sets CI=true, which makes react-scripts fail the build on ESLint
+        # warnings as well as errors -- this step doubles as the lint.
+        run: |-
+          cd frontend
+          npm run build
+
+  publish-frontend:
+    uses: pennlabs/shared-actions/.github/workflows/docker-publish.yaml@v0.1.10
+    with:
+      imageName: "dashboard-frontend"
+      githubRef: ${{ github.ref }}
+      gitSha: ${{ github.sha }}
+      path: frontend
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+    needs: frontend-check
+
+  # Deploy
+  # ========================================================================================================
+
+  k8s-check:
+    name: K8s Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Synth cdk8s manifests
+        # Catches a broken k8s/main.ts on every push, instead of in the deploy job
+        # after the images are already published. Placeholder values; only the
+        # deploy job's synth produces manifests that get applied.
+        run: |-
+          cd k8s
+          yarn install --frozen-lockfile
+          yarn build
+        env:
+          RELEASE_NAME: dashboard
+          GIT_SHA: ${{ github.sha }}
+          AWS_ACCOUNT_ID: "000000000000"
+
+  deploy:
+    name: "Deploy"
+    # Master only. Synthesizes k8s/main.ts with the real commit SHA and applies it
+    # to the production cluster with --prune on app.kubernetes.io/part-of=dashboard.
+    uses: pennlabs/shared-actions/.github/workflows/deployment.yaml@v0.1.10
+    with:
+      githubRef: ${{ github.ref }}
+      gitSha: ${{ github.sha }}
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      GH_AWS_ACCESS_KEY_ID: ${{ secrets.GH_AWS_ACCESS_KEY_ID }}
+      GH_AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_AWS_SECRET_ACCESS_KEY }}
+    needs:
+      - publish-backend
+      - publish-frontend
+      - k8s-check

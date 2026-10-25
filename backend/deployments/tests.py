@@ -398,6 +398,38 @@ class AllowlistSettingTest(SimpleTestCase):
                 self.assertTrue(pennkey)
 
 
+class ProductionProxySettingsTest(SimpleTestCase):
+    """The OAuth callback must look like https behind the TLS-terminating ingress.
+
+    The callback tests can't catch this: they stub `fetch_token`, and the
+    development settings set OAUTHLIB_INSECURE_TRANSPORT, so oauthlib would
+    accept an http:// URI anyway. In production neither is true, and an
+    http:// callback URI makes oauthlib raise InsecureTransportError.
+    """
+
+    def test_forwarded_https_callback_is_rebuilt_as_https(self):
+        import importlib
+        import os
+
+        from django.test import RequestFactory
+
+        with mock.patch.dict(os.environ, {"SECRET_KEY": "test"}):
+            production = importlib.import_module("dashboard.settings.production")
+
+        # What Traefik forwards to the pod: plain HTTP, original scheme in a header.
+        request = RequestFactory().get(
+            "/api/accounts/callback/?code=abc&state=s",
+            HTTP_HOST="dashboard.pennlabs.org",
+            HTTP_X_FORWARDED_PROTO="https",
+        )
+        with override_settings(
+            SECURE_PROXY_SSL_HEADER=production.SECURE_PROXY_SSL_HEADER
+        ):
+            uri = request.build_absolute_uri()
+
+        self.assertTrue(uri.startswith("https://dashboard.pennlabs.org/"), uri)
+
+
 def _fake_replicaset(revision, image, name="rs", deployment="clubs-backend", labels=None):
     """A ReplicaSet shaped like the real thing.
 

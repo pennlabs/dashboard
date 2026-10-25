@@ -38,6 +38,14 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = ["https://dashboard.pennlabs.org"]
+
+# Traefik terminates TLS and forwards plain HTTP with X-Forwarded-Proto: https.
+# Without trusting that header, request.build_absolute_uri() yields http://, and
+# DLA hands that URI to oauthlib during the callback -- which raises
+# InsecureTransportError, so every sign-in fails with ?auth_error=oauth.
+# Platform's own production settings set the same thing for the same reason.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
