@@ -195,6 +195,17 @@ button {
   display: block;
   flex-shrink: 0;
 }
+/* Dark mode sets the logo on a white badge, so the wordmark goes back to the
+   source file's navy instead of inheriting the header's white. */
+[data-theme="dark"] .brand-logo {
+  background: #ffffff;
+  color: #12274b;
+  padding: 4px 8px;
+  border-radius: 8px;
+  /* The global border-box would take the padding out of the 26px height and
+     shrink the wordmark; add it outside instead. */
+  box-sizing: content-box;
+}
 
 .live-pill {
   display: inline-flex;
@@ -495,6 +506,17 @@ button {
   color: var(--accent-fg);
 }
 .btn-primary:hover { background: var(--accent-hover); }
+/* Links styled as buttons (the auth screens' "Try again", "Sign out") must keep
+   the button's text color. Otherwise `[data-theme="dark"] a`, being more
+   specific than `.btn-primary`, paints them link-green on a green button. */
+a.btn-primary,
+[data-theme="dark"] a.btn-primary {
+  color: var(--accent-fg);
+}
+a.btn-secondary,
+[data-theme="dark"] a.btn-secondary {
+  color: var(--text);
+}
 .btn-primary:active { transform: scale(0.98); }
 .btn-secondary {
   background: var(--surface);
