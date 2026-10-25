@@ -37,6 +37,17 @@ const BACKEND_PORT = 8000
 
 const HOST = "dashboard.pennlabs.org"
 
+// Send plain-HTTP visitors to HTTPS, via the cluster's shared Traefik
+// middleware (the same one platform, penn-clubs and office-hours-queue use).
+// Without it http://dashboard.pennlabs.org serves the SPA, but the session and
+// CSRF cookies are Secure-only, so sign-in could never stick.
+const ingressProps = {
+  annotations: {
+    "traefik.ingress.kubernetes.io/router.middlewares":
+      "default-redirect-http@kubernetescrd",
+  },
+}
+
 class DashboardChart extends PennLabsChart {
   constructor(scope: Construct) {
     super(scope, "dashboard")
@@ -62,8 +73,15 @@ class DashboardChart extends PennLabsChart {
     // These live in the chart rather than a hand-written rbac.yaml so that CI
     // applies them along with everything else. (ClusterRole/ClusterRoleBinding
     // aren't in kubectl's default prune whitelist, so `--prune` leaves them be.)
+    //
+    // imagePullSecrets: Terraform's eks-bootstrap patches `docker-pull-secret`
+    // onto the `default` ServiceAccount only, and that is how every other
+    // Penn Labs pod authenticates to Docker Hub. A pod running as this SA does
+    // not inherit it, so without restating it here the backend would pull
+    // anonymously -- rate-limited, and an ImagePullBackOff if the image is private.
     const serviceAccount = new KubeServiceAccount(this, "backend-sa", {
       metadata: { name: "dashboard-backend" },
+      imagePullSecrets: [{ name: "docker-pull-secret" }],
     })
 
     const clusterRole = new KubeClusterRole(this, "backend-reader", {
@@ -146,6 +164,7 @@ class DashboardChart extends PennLabsChart {
       },
       djangoSettingsModule: "dashboard.settings.production",
       domains: [{ host: HOST, paths: ["/api"], isSubdomain: true }],
+      ingressProps,
     })
 
     // ----------------------------------------------------- React frontend
@@ -170,6 +189,7 @@ class DashboardChart extends PennLabsChart {
         ],
       },
       domain: { host: HOST, paths: ["/"], isSubdomain: true },
+      ingressProps,
     })
   }
 }

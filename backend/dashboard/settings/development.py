@@ -40,10 +40,21 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 # products use locally. The redirect URI is port 3000 (the frontend dev server,
 # which proxies it through to us) and must match what platform-dev has
 # registered for this client -- don't change it without talking to Platform.
+#
+# All three can be overridden from the environment to sign in against production
+# Platform instead, with an OAuth client you registered there yourself (its
+# redirect URI must include http://localhost:3000/api/accounts/callback/). That
+# returns your real pennkey and `*_admin` permissions, so it exercises the actual
+# team-lead rule rather than the shared `engineering` account below:
+#
+#   LABS_PLATFORM_URL=https://platform.pennlabs.org \
+#   LABS_CLIENT_ID=... LABS_CLIENT_SECRET=... ./dev.sh
 PLATFORM_ACCOUNTS = {
-    "CLIENT_ID": "clientid",
-    "CLIENT_SECRET": "supersecretclientsecret",
-    "PLATFORM_URL": "https://platform-dev.pennlabs.org",
+    "CLIENT_ID": os.getenv("LABS_CLIENT_ID", "clientid"),
+    "CLIENT_SECRET": os.getenv("LABS_CLIENT_SECRET", "supersecretclientsecret"),
+    "PLATFORM_URL": os.getenv(
+        "LABS_PLATFORM_URL", "https://platform-dev.pennlabs.org"
+    ),
     "REDIRECT_URI": os.getenv(
         "LABS_REDIRECT_URI", "http://localhost:3000/api/accounts/callback/"
     ),
