@@ -1,9 +1,14 @@
 import { useState } from "react"
 
-import type { ReplicaSetSnapshot } from "../types"
+import type { Commits, ReplicaSetSnapshot } from "../types"
+import { revisionLabel } from "./CompareRevisions"
+import { compareUrl } from "./VersionLink"
 
 interface Props {
   replicasets: ReplicaSetSnapshot[]
+  commits?: Commits
+  currentVersion: string
+  repoName: string
   onConfirm: (image: string) => void
   onClose: () => void
   isLoading: boolean
@@ -11,6 +16,9 @@ interface Props {
 
 export default function RollbackDialog({
   replicasets,
+  commits,
+  currentVersion,
+  repoName,
   onConfirm,
   onClose,
   isLoading,
@@ -20,6 +28,12 @@ export default function RollbackDialog({
   const [selectedImage, setSelectedImage] = useState(
     replicasets[1]?.image ?? replicasets[0]?.image ?? ""
   )
+
+  // Target to current, so the diff reads as what rolling back would take away.
+  const target = replicasets.find((rs) => rs.image === selectedImage)
+  const diffUrl = target
+    ? compareUrl(repoName, target.version, currentVersion)
+    : null
 
   return (
     <div
@@ -47,6 +61,7 @@ export default function RollbackDialog({
           minWidth: 420,
           maxWidth: "100%",
           display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: 18,
           border: "1px solid var(--border)",
           boxShadow: "var(--shadow-lg)",
@@ -73,14 +88,20 @@ export default function RollbackDialog({
         >
           {replicasets.map((rs) => (
             <option key={rs.revision} value={rs.image}>
-              Rev {rs.revision} · {rs.version ? rs.version.slice(0, 7) : "?"}{" "}
-              ·{" "}
-              {rs.created_at
-                ? new Date(rs.created_at).toLocaleDateString()
-                : "?"}
+              {revisionLabel(rs, commits?.[rs.version])}
             </option>
           ))}
         </select>
+        {diffUrl ? (
+          <a
+            href={diffUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 13, width: "fit-content" }}
+          >
+            See what this rolls back on GitHub ↗
+          </a>
+        ) : null}
         <div
           style={{
             display: "flex",

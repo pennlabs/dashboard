@@ -273,6 +273,7 @@ dependencies = [
     { name = "djangorestframework" },
     { name = "gunicorn" },
     { name = "kubernetes" },
+    { name = "requests" },
 ]
 
 [package.metadata]
@@ -283,6 +284,7 @@ requires-dist = [
     { name = "djangorestframework", specifier = "==3.16.*" },
     { name = "gunicorn", specifier = "==21.*" },
     { name = "kubernetes", specifier = "==29.*" },
+    { name = "requests", specifier = "==2.*" },
 ]
 
 [[package]]

@@ -25,6 +25,22 @@ export const useDeployment = (namespace: string, name: string) =>
     enabled: Boolean(namespace && name),
   })
 
+/**
+ * `versions` only keys the query, so a new rollout fetches straight away. The
+ * interval is what fills in commits GitHub couldn't answer for the first time.
+ */
+export const useCommits = (
+  namespace: string,
+  name: string,
+  versions: string[]
+) =>
+  useQuery({
+    queryKey: ["commits", namespace, name, versions],
+    queryFn: () => api.getCommits(namespace, name),
+    refetchInterval: 60000,
+    enabled: versions.length > 0,
+  })
+
 export const usePods = (namespace: string, name: string) =>
   useQuery({
     queryKey: ["pods", namespace, name],

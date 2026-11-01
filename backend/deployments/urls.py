@@ -12,6 +12,10 @@ urlpatterns = [
         views.deployment_detail,
     ),
     path(
+        "deployments/<str:namespace>/<str:name>/commits/",
+        views.deployment_commits,
+    ),
+    path(
         "deployments/<str:namespace>/<str:name>/pods/",
         views.deployment_pods,
     ),

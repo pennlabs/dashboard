@@ -27,6 +27,9 @@ limited to team leads — see [Authentication](#authentication).
 - **Penn Labs SSO** via `django-labs-accounts`, with authorization derived from
   the product-admin permissions Platform already tracks — so "team leads only"
   needs no separate list of pennkeys to maintain.
+- **Commit context** on each deployment: messages and authors from the GitHub
+  API, and GitHub compare links between revisions, including from the rollback
+  dialog. See [Commit details](#commit-details).
 - **Unit tests** that mock the K8s client and verify both the API logic and the
   access-control rules in isolation.
 
@@ -143,13 +146,14 @@ docker compose up --build
 ```bash
 cd backend
 uv run python manage.py test
-# Ran 23 tests in 0.038s — OK
+# Ran 87 tests in 0.09s — OK
 ```
 
 `uv run` syncs the environment against `uv.lock` before executing, so you
 never run tests against a stale set of packages.
 
-The tests mock the Kubernetes client entirely, so they don't need a cluster.
+The tests mock the Kubernetes client and the GitHub API entirely, so they don't
+need a cluster or a network.
 They verify view logic (label-based product grouping, dict shaping for the JSON
 API, 404 handling, rollback input validation) and access control: that anonymous
 users and signed-in non-leads are refused, that a rollback is rejected *before*
@@ -298,6 +302,29 @@ would let the API scale out again.
 [dla]: https://github.com/pennlabs/django-labs-accounts
 [infra]: https://github.com/pennlabs/infrastructure
 
+## Commit details
+
+The deployment page shows each deployed commit's message and author, and links to
+GitHub's compare view between any two revisions. The rollback dialog links to the
+same diff, showing what the rollback would take away.
+
+The repo is assumed to be `pennlabs/<product>`, the same convention the SHA links
+use. Lookups go through the backend (`deployments/github_client.py`), in their own
+request so a slow GitHub never delays the live Kubernetes data, and the SHAs come
+from the cluster rather than from the browser.
+
+`GITHUB_TOKEN` is optional, but production should have one. Without it, private
+repos aren't visible and GitHub allows 60 requests an hour, shared with everything
+else behind the cluster's NAT. Use a token with read-only access to repo contents
+and add it to the Vault secret at `secrets/production/default/dashboard`; every key
+there reaches the backend as an environment variable, so the chart doesn't change.
+Locally, `GITHUB_TOKEN=$(gh auth token) ./dev.sh` does the job.
+
+Unlike Kubernetes state, this data *is* cached, in memory per gunicorn worker,
+because a commit never changes. Anything GitHub can't answer falls back to the bare
+SHA. Compare links are plain links to github.com, so they need neither the token
+nor the API; viewing a private repo's diff needs the viewer's own GitHub access.
+
 ## Project structure
 
 ```
@@ -314,6 +341,7 @@ backend/
 │   └── urls.py                      # mounts DLA at /api/accounts/
 └── deployments/                     # the actual app
     ├── k8s_client.py                # all calls to the K8s API live here
+    ├── github_client.py             # commit details from GitHub, cached
     ├── backends.py                  # auth backend: who counts as a team lead
     ├── permissions.py               # IsTeamLead — the project-wide default
     ├── views.py                     # thin DRF views, no business logic

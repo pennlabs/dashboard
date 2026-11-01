@@ -1,4 +1,4 @@
-import type { CurrentUser, Deployment, Pod, Product } from "../types"
+import type { Commits, CurrentUser, Deployment, Pod, Product } from "../types"
 
 // Empty by default: the dev server proxies /api to Django (see setupProxy.js) and
 // in production nginx and the API sit behind the same host. Same-origin requests
@@ -74,6 +74,11 @@ export const getProduct = (name: string) =>
 export const getDeployment = (namespace: string, name: string) =>
   apiFetch<Deployment>(
     `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/`
+  )
+
+export const getCommits = (namespace: string, name: string) =>
+  apiFetch<Commits>(
+    `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/commits/`
   )
 
 export const getPods = (namespace: string, name: string) =>
