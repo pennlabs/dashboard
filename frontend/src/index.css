@@ -631,3 +631,233 @@ a.btn-secondary,
   color: var(--header-text);
   text-decoration: underline;
 }
+
+/* ---------- Header navigation ---------- */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.app-header .nav-link {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 500;
+}
+.app-header .nav-link:hover,
+.app-header .nav-link.active {
+  color: var(--header-text);
+}
+
+/* ---------- Database page ---------- */
+.alarm-form {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 260px;
+}
+.alarm-form .select {
+  flex: 1;
+  min-width: 0;
+}
+.alarm-error {
+  margin: -6px 0 14px;
+  color: var(--danger);
+  font-size: 13px;
+}
+.db-sections {
+  display: grid;
+  gap: 18px;
+}
+.db-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+.db-card {
+  padding: 20px;
+  min-width: 0;
+}
+.db-card h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.db-card p {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.db-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.db-stats {
+  display: flex;
+  gap: 24px;
+  margin: 0;
+}
+.db-stats dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.db-stats dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.db-table-toggle {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.db-table-toggle summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.db-table-toggle .db-table {
+  display: block;
+  max-height: 240px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+.db-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.db-table th,
+.db-table td {
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+}
+.db-table th {
+  color: var(--text-muted);
+}
+.db-table .db-number {
+  padding-right: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.db-queries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.db-queries li {
+  display: flex;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.db-queries details {
+  flex: 1;
+  min-width: 0;
+}
+.db-queries summary {
+  overflow: hidden;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-queries pre {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.db-queries p {
+  margin: 0;
+  font-size: 12px;
+}
+.db-share {
+  flex: 0 0 40px;
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* ---------- Load chart ---------- */
+.load-chart {
+  position: relative;
+  min-height: 240px;
+}
+.load-chart svg {
+  display: block;
+}
+.load-chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.load-chart-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+.load-chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.load-chart-area {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+}
+.load-chart-limit {
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+}
+.load-chart-limit-label {
+  fill: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.load-chart-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.load-chart-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.load-chart-tooltip {
+  position: absolute;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text-secondary);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.load-chart-tooltip strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+@media (max-width: 640px) {
+  .app-header-inner {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .live-pill {
+    display: none;
+  }
+}
