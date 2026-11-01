@@ -7,10 +7,13 @@ no real cluster required. Run with:
     python manage.py test
 """
 
+import json
 from types import SimpleNamespace
 from unittest import mock
 
+import requests
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from kubernetes.client.exceptions import ApiException
 
@@ -19,7 +22,7 @@ from django.shortcuts import redirect
 from oauthlib.oauth2 import InvalidGrantError, MismatchingStateError
 from requests.exceptions import ConnectionError
 
-from deployments import k8s_client, oauth
+from deployments import github_client, k8s_client, oauth
 from deployments.backends import DashboardUserBackend
 
 
@@ -190,6 +193,165 @@ class RollbackApiTest(LeadClientMixin, TestCase):
         mock_rollback.assert_called_once_with(
             "default", "clubs-backend", "pennlabs/clubs:abc123"
         )
+
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+def _github_response(status=200, message="Fix login\n\nLonger body", author="Ada"):
+    res = requests.Response()
+    res.status_code = status
+    if status == 200:
+        res._content = json.dumps(
+            {"commit": {"message": message, "author": {"name": author}}}
+        ).encode()
+    return res
+
+
+class GetCommitsTest(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        patcher = mock.patch("deployments.github_client.requests.get")
+        self.mock_get = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_returns_subject_line_and_author(self):
+        self.mock_get.return_value = _github_response()
+        self.assertEqual(
+            github_client.get_commits("penn-clubs", [SHA_A]),
+            {SHA_A: {"message": "Fix login", "author": "Ada"}},
+        )
+        self.assertEqual(
+            self.mock_get.call_args.args[0],
+            f"https://api.github.com/repos/pennlabs/penn-clubs/commits/{SHA_A}",
+        )
+
+    def test_commit_is_only_fetched_once(self):
+        # Commits are immutable, and the unauthenticated limit is 60 an hour.
+        self.mock_get.return_value = _github_response()
+        github_client.get_commits("penn-clubs", [SHA_A])
+        github_client.get_commits("penn-clubs", [SHA_A])
+        self.mock_get.assert_called_once()
+
+    def test_same_sha_in_another_repo_is_a_different_commit(self):
+        self.mock_get.return_value = _github_response()
+        github_client.get_commits("penn-clubs", [SHA_A])
+        github_client.get_commits("penn-courses", [SHA_A])
+        self.assertEqual(self.mock_get.call_count, 2)
+
+    def test_missing_commit_is_omitted_and_remembered(self):
+        self.mock_get.return_value = _github_response(status=404)
+        self.assertEqual(github_client.get_commits("private-repo", [SHA_A]), {})
+        self.assertEqual(github_client.get_commits("private-repo", [SHA_A]), {})
+        self.mock_get.assert_called_once()
+
+    def test_rate_limit_stops_further_calls_but_keeps_cached_commits(self):
+        self.mock_get.return_value = _github_response()
+        github_client.get_commits("penn-clubs", [SHA_A])
+
+        self.mock_get.reset_mock()
+        self.mock_get.return_value = _github_response(status=403)
+        result = github_client.get_commits("penn-clubs", [SHA_B, "c" * 40, SHA_A])
+
+        self.assertEqual(list(result), [SHA_A])
+        self.mock_get.assert_called_once()
+
+    def test_failure_is_retried_once_the_backoff_expires(self):
+        self.mock_get.side_effect = requests.ConnectionError("no route")
+        self.assertEqual(github_client.get_commits("penn-clubs", [SHA_A]), {})
+
+        cache.delete(github_client._BACKOFF_KEY)
+        self.mock_get.side_effect = None
+        self.mock_get.return_value = _github_response()
+        self.assertIn(SHA_A, github_client.get_commits("penn-clubs", [SHA_A]))
+
+    @override_settings(GITHUB_TOKEN="secret")
+    def test_token_is_sent_when_configured(self):
+        self.mock_get.return_value = _github_response()
+        github_client.get_commits("penn-clubs", [SHA_A])
+        self.assertEqual(
+            self.mock_get.call_args.kwargs["headers"]["Authorization"], "Bearer secret"
+        )
+
+    @override_settings(GITHUB_TOKEN="")
+    def test_no_auth_header_without_a_token(self):
+        self.mock_get.return_value = _github_response()
+        github_client.get_commits("penn-clubs", [SHA_A])
+        self.assertNotIn("Authorization", self.mock_get.call_args.kwargs["headers"])
+
+    def test_commit_with_no_author_still_resolves(self):
+        res = _github_response()
+        res._content = json.dumps({"commit": {"message": "x", "author": None}}).encode()
+        self.mock_get.return_value = res
+        self.assertEqual(
+            github_client.get_commits("penn-clubs", [SHA_A])[SHA_A]["author"], ""
+        )
+
+
+class DeployedCommitsTest(SimpleTestCase):
+    def _replicaset(self, image):
+        return SimpleNamespace(
+            metadata=SimpleNamespace(
+                labels={}, annotations={}, creation_timestamp=None
+            ),
+            spec=SimpleNamespace(
+                template=SimpleNamespace(
+                    spec=SimpleNamespace(containers=[SimpleNamespace(image=image)])
+                )
+            ),
+        )
+
+    def test_current_version_first_then_history_without_duplicates(self):
+        dep = _fake_deployment("clubs-backend", "default", "penn-clubs", SHA_A)
+        history = [
+            self._replicaset(f"pennlabs/clubs:{SHA_A}"),
+            self._replicaset(f"pennlabs/clubs:{SHA_B}"),
+        ]
+        self.assertEqual(k8s_client.deployed_commits(dep, history), [SHA_A, SHA_B])
+
+    def test_non_commit_versions_are_skipped(self):
+        # Asking GitHub about `latest` or `6.0` would resolve to the wrong thing
+        # at best, and waste the rate limit at worst.
+        dep = _fake_deployment("pingmobile", "default", "pingmobile", "latest")
+        history = [self._replicaset("redis:6.0")]
+        self.assertEqual(k8s_client.deployed_commits(dep, history), [])
+
+
+class DeploymentCommitsApiTest(LeadClientMixin, TestCase):
+    url = "/api/deployments/default/clubs-backend/commits/"
+
+    @mock.patch("deployments.github_client.get_commits")
+    @mock.patch("deployments.k8s_client.get_replicasets", return_value=[])
+    @mock.patch("deployments.k8s_client.get_deployment")
+    def test_looks_up_the_deployments_commits_in_its_products_repo(
+        self, mock_get, _mock_rs, mock_commits
+    ):
+        mock_get.return_value = _fake_deployment(
+            "clubs-backend", "default", "penn-clubs", SHA_A
+        )
+        mock_commits.return_value = {SHA_A: {"message": "Fix", "author": "Ada"}}
+
+        res = self.client.get(self.url)
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), mock_commits.return_value)
+        mock_commits.assert_called_once_with("penn-clubs", [SHA_A])
+
+    @mock.patch(
+        "deployments.k8s_client.get_deployment", side_effect=ApiException(status=404)
+    )
+    def test_unknown_deployment_is_404(self, _mock_get):
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+
+class CommitsAccessControlTest(TestCase):
+    @mock.patch("deployments.k8s_client.get_deployment")
+    def test_anonymous_cannot_read_commits(self, mock_get):
+        res = self.client.get("/api/deployments/default/clubs-backend/commits/")
+        self.assertEqual(res.status_code, 403)
+        mock_get.assert_not_called()
 
 
 class HealthCheckTest(TestCase):

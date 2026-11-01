@@ -118,6 +118,12 @@ DASHBOARD_ALLOWED_USERS = [
     if pennkey.strip()
 ]
 
+# Optional. Authenticates the GitHub lookups behind commit messages and authors,
+# which is what makes private repos visible and raises the rate limit from 60 to
+# 5,000 requests an hour. Without it the dashboard still works; commits GitHub
+# won't describe just show as bare SHAs. Needs read access to repo contents only.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+
 LOGIN_URL = "/api/accounts/login/"
 
 # Sessions expire daily-ish so that a lead who rotates off the team loses access

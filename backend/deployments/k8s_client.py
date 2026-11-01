@@ -228,6 +228,17 @@ def replicaset_to_dict(rs: Any) -> dict[str, Any]:
     }
 
 
+def deployed_commits(dep: Any, replicasets: list[Any]) -> list[str]:
+    """Every commit SHA this Deployment runs or has run, newest first, deduplicated.
+
+    The current version comes from the Deployment's label because a Deployment on
+    an upstream image (a Redis sidecar) has no commit in any ReplicaSet's image.
+    """
+    versions = [version(dep)]
+    versions += [replicaset_to_dict(rs)["version"] for rs in replicasets]
+    return list(dict.fromkeys(v for v in versions if looks_like_commit(v)))
+
+
 # ---------------------------------------------------------------------------
 # Pods
 # ---------------------------------------------------------------------------

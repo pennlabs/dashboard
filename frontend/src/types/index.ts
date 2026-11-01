@@ -28,6 +28,15 @@ export interface ReplicaSetSnapshot {
   created_at: string | null
 }
 
+/** What GitHub says about a deployed commit. */
+export interface CommitInfo {
+  message: string
+  author: string
+}
+
+/** Keyed by SHA. Commits GitHub couldn't describe are simply absent. */
+export type Commits = Record<string, CommitInfo>
+
 export interface DeploymentSummary {
   name: string
   namespace: string

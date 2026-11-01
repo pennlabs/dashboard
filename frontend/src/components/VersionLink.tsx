@@ -4,6 +4,17 @@
 // /commit/<value> just produces a 404, so we render them as plain text instead.
 const COMMIT_RE = /^[0-9a-f]{7,40}$/
 
+export const isCommit = (version: string) => COMMIT_RE.test(version)
+
+/**
+ * GitHub's diff of everything `head` adds to `base`, or null if there's nothing
+ * to compare: either side isn't a commit, or they're the same one.
+ */
+export function compareUrl(repoName: string, base: string, head: string) {
+  if (!isCommit(base) || !isCommit(head) || base === head) return null
+  return `https://github.com/pennlabs/${repoName}/compare/${base}...${head}`
+}
+
 const chipStyle = {
   fontSize: 13,
   padding: "2px 8px",
@@ -24,7 +35,7 @@ export function VersionLink({
   if (!version) return <span style={{ color: "var(--text-muted)" }}>—</span>
 
   // Not a commit -> show the value, but don't pretend it's a linkable revision.
-  if (!COMMIT_RE.test(version)) {
+  if (!isCommit(version)) {
     return (
       <span className="mono" style={chipStyle} title="Not a commit reference">
         {version}

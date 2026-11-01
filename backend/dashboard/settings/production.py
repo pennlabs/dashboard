@@ -11,6 +11,9 @@ Required environment (see `secret: "dashboard"` in k8s/main.ts):
   LABS_CLIENT_ID       OAuth client issued by Platform
   LABS_CLIENT_SECRET   ditto
   LABS_REDIRECT_URI    https://dashboard.pennlabs.org/api/accounts/callback/
+
+Optional:
+  GITHUB_TOKEN         commit details for private repos, higher rate limit
 """
 
 import os

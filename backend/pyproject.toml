@@ -25,6 +25,9 @@ dependencies = [
     # (in-cluster). This is the entire reason this app exists.
     "kubernetes==29.*",
 
+    # Reads commit messages and authors from the GitHub API.
+    "requests==2.*",
+
     # WSGI server used by the Docker image.
     "gunicorn==21.*",
 ]

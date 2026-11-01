@@ -1,11 +1,18 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
+import CommitSummary from "../components/CommitSummary"
+import CompareRevisions from "../components/CompareRevisions"
 import { getHealthStatus, HealthBadge } from "../components/HealthBadge"
 import PodStatusList from "../components/PodStatusList"
 import RollbackDialog from "../components/RollbackDialog"
-import { VersionLink } from "../components/VersionLink"
-import { useDeployment, usePods, useRollback } from "../hooks/useDeployments"
+import { isCommit, VersionLink } from "../components/VersionLink"
+import {
+  useCommits,
+  useDeployment,
+  usePods,
+  useRollback,
+} from "../hooks/useDeployments"
 
 export default function DeploymentDetail() {
   const { namespace = "", name = "" } = useParams()
@@ -13,6 +20,12 @@ export default function DeploymentDetail() {
 
   const { data: dep, isLoading, error } = useDeployment(namespace, name)
   const { data: pods } = usePods(namespace, name)
+  const versions = dep
+    ? [dep.current_version, ...dep.replicasets.map((rs) => rs.version)].filter(
+        isCommit
+      )
+    : []
+  const { data: commits } = useCommits(namespace, name, versions)
   const rollbackMutation = useRollback(namespace, name)
 
   if (isLoading)
@@ -123,6 +136,7 @@ export default function DeploymentDetail() {
           version={dep.current_version}
           repoName={dep.product_name}
         />
+        <CommitSummary commit={commits?.[dep.current_version]} />
         {dep.replicasets.length > 1 ? (
           <button
             type="button"
@@ -154,6 +168,11 @@ export default function DeploymentDetail() {
         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           ReplicaSet history
         </h3>
+        <CompareRevisions
+          replicasets={dep.replicasets}
+          commits={commits}
+          repoName={dep.product_name}
+        />
         <ol
           style={{
             margin: 0,
@@ -189,9 +208,7 @@ export default function DeploymentDetail() {
               >
                 rev {rs.revision}
               </span>
-              <code style={{ color: "var(--text)" }}>
-                {rs.version ? rs.version.slice(0, 7) : "-"}
-              </code>
+              <VersionLink version={rs.version} repoName={dep.product_name} />
               <span className="mono" style={{ color: "var(--text-muted)" }}>
                 {rs.image}
               </span>
@@ -206,6 +223,10 @@ export default function DeploymentDetail() {
                   {new Date(rs.created_at).toLocaleString()}
                 </span>
               ) : null}
+              <CommitSummary
+                commit={commits?.[rs.version]}
+                style={{ flexBasis: "100%" }}
+              />
             </li>
           ))}
         </ol>
@@ -214,6 +235,9 @@ export default function DeploymentDetail() {
       {showRollback ? (
         <RollbackDialog
           replicasets={dep.replicasets}
+          commits={commits}
+          currentVersion={dep.current_version}
+          repoName={dep.product_name}
           onConfirm={onConfirmRollback}
           onClose={() => setShowRollback(false)}
           isLoading={rollbackMutation.isPending}

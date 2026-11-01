@@ -149,7 +149,8 @@ class DashboardChart extends PennLabsChart {
         // Kubernetes Secret arrives as an environment variable. It must supply
         // SECRET_KEY (signs session cookies -- production refuses to start
         // without it) plus LABS_CLIENT_ID and LABS_CLIENT_SECRET, the OAuth
-        // credentials Platform issues for this product. Populated from Vault at
+        // credentials Platform issues for this product. GITHUB_TOKEN is optional
+        // (see settings/base.py). Populated from Vault at
         // secrets/production/default/dashboard by vault-secret-sync.
         secret: "dashboard",
         env: [

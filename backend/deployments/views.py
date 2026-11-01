@@ -1,7 +1,8 @@
 """HTTP views for the dashboard.
 
-Every endpoint reads live from the Kubernetes API; nothing is persisted. This
-module is intentionally thin -- the heavy lifting (label filtering, owner
+Every endpoint reads live from the Kubernetes API; nothing is persisted. (The
+one addition is `deployment_commits`, which also asks GitHub about those
+commits.) This module is intentionally thin -- the heavy lifting (label filtering, owner
 reference walking, dict shaping) lives in `k8s_client`.
 
 Access control: `IsTeamLead` is the project-wide default permission (see
@@ -20,7 +21,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from . import k8s_client
+from . import github_client, k8s_client
 
 
 def _build_products(deployments: list[Any]) -> dict[str, dict]:
@@ -114,6 +115,24 @@ def deployment_detail(_request, namespace: str, name: str):
         for rs in k8s_client.get_replicasets(namespace, name)
     ]
     return Response(payload)
+
+
+@api_view(["GET"])
+def deployment_commits(_request, namespace: str, name: str):
+    """GitHub details for the commits this Deployment has run, keyed by SHA.
+
+    Separate from `deployment_detail` so that a slow GitHub can't hold up the
+    live data. The SHAs come from the cluster rather than the query string, so
+    this can't be used to read arbitrary commits with the backend's token.
+    """
+    try:
+        dep = k8s_client.get_deployment(namespace, name)
+        replicasets = k8s_client.get_replicasets(namespace, name)
+    except ApiException as exc:
+        return Response({"error": str(exc)}, status=exc.status or 500)
+
+    shas = k8s_client.deployed_commits(dep, replicasets)
+    return Response(github_client.get_commits(k8s_client.product_name(dep), shas))
 
 
 @api_view(["GET"])
