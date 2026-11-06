@@ -124,6 +124,19 @@ DASHBOARD_ALLOWED_USERS = [
 # won't describe just show as bare SHAs. Needs read access to repo contents only.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
+# The Performance Insights data behind the Database page. Every product shares
+# this one RDS instance. The resource id is its DbiResourceId, not its name, and
+# the backend's IAM role (terraform/dashboard.tf in pennlabs/infrastructure) only
+# has access to this one. Locally, boto3 uses your own AWS profile instead:
+# `AWS_PROFILE=pennlabs ./dev.sh`.
+PERFORMANCE_INSIGHTS_REGION = "us-east-1"
+PERFORMANCE_INSIGHTS_RESOURCE_ID = os.getenv(
+    "PERFORMANCE_INSIGHTS_RESOURCE_ID", "db-UZ6WEKHZ2ZTWOOJCPYO3KAQECM"
+)
+# Load above this many active sessions means queries are queueing for CPU. Drawn
+# as a line on the graph, so update it if the instance is resized. db.t3.large.
+DATABASE_VCPUS = int(os.getenv("DATABASE_VCPUS", "2"))
+
 LOGIN_URL = "/api/accounts/login/"
 
 # Sessions expire daily-ish so that a lead who rotates off the team loses access

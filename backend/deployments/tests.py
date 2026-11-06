@@ -8,10 +8,12 @@ no real cluster required. Run with:
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
 import requests
+from botocore.exceptions import ClientError, EndpointConnectionError
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import Client, SimpleTestCase, TestCase, override_settings
@@ -22,7 +24,7 @@ from django.shortcuts import redirect
 from oauthlib.oauth2 import InvalidGrantError, MismatchingStateError
 from requests.exceptions import ConnectionError
 
-from deployments import github_client, k8s_client, oauth
+from deployments import github_client, k8s_client, oauth, pi_client
 from deployments.backends import DashboardUserBackend
 
 
@@ -1102,3 +1104,257 @@ class EndToEndSignInTest(TestCase):
         self.assertFalse(me["is_lead"])
         with mock.patch("deployments.k8s_client.list_deployments", return_value=[]):
             self.assertEqual(client.get("/api/products/").status_code, 403)
+
+
+def _client_error(code):
+    return ClientError({"Error": {"Code": code, "Message": "nope"}}, "operation")
+
+
+def _fake_pi_client(values=(1.0, 3.0, None)):
+    """A boto3 Performance Insights client with canned answers."""
+    start = datetime(2026, 11, 1, 20, 0, tzinfo=timezone.utc)
+    points = []
+    for minute, value in enumerate(values):
+        point = {"Timestamp": start + timedelta(minutes=minute)}
+        if value is not None:
+            point["Value"] = value
+        points.append(point)
+
+    by_group = {
+        "db.sql_tokenized": {
+            "Total": 1.5,
+            "Dimensions": {
+                "db.sql_tokenized.id": "ABC",
+                "db.sql_tokenized.statement": "SELECT ?",
+            },
+        },
+        "db.user": {"Total": 2.0, "Dimensions": {"db.user.name": "penn-courses"}},
+        "db.wait_event": {"Total": 0.5, "Dimensions": {"db.wait_event.name": "CPU"}},
+    }
+    client = mock.Mock()
+    client.get_resource_metrics.return_value = {"MetricList": [{"DataPoints": points}]}
+    client.describe_dimension_keys.side_effect = lambda **kwargs: {
+        "Keys": [by_group[kwargs["GroupBy"]["Group"]]]
+    }
+    return client
+
+
+class GetInsightsTest(SimpleTestCase):
+    START = datetime(2026, 11, 1, 20, 0, tzinfo=timezone.utc)
+
+    def _insights(self, client, window=timedelta(minutes=30)):
+        with mock.patch("deployments.pi_client._client", return_value=client):
+            return pi_client.get_insights(self.START, self.START + window)
+
+    def test_shapes_the_response(self):
+        insights = self._insights(_fake_pi_client())
+
+        self.assertEqual(insights["period_seconds"], 60)
+        self.assertEqual(insights["vcpus"], 2)
+        self.assertEqual(insights["peak_load"], 3.0)
+        self.assertEqual(insights["average_load"], 2.0)
+        self.assertEqual(
+            insights["queries"],
+            [{"id": "ABC", "statement": "SELECT ?", "load": 1.5, "share": 0.75}],
+        )
+        self.assertEqual(
+            insights["users"], [{"name": "penn-courses", "load": 2.0, "share": 1.0}]
+        )
+        self.assertEqual(insights["waits"], [{"name": "CPU", "load": 0.5, "share": 0.25}])
+
+    def test_a_missing_sample_is_a_gap_not_zero(self):
+        insights = self._insights(_fake_pi_client())
+
+        self.assertIsNone(insights["load"][2]["load"])
+        # And it doesn't drag the average down either.
+        self.assertEqual(insights["average_load"], 2.0)
+
+    def test_no_data_does_not_divide_by_zero(self):
+        client = _fake_pi_client(values=())
+        client.describe_dimension_keys.side_effect = None
+        client.describe_dimension_keys.return_value = {
+            "Keys": [{"Total": 0.0, "Dimensions": {"db.user.name": "idle"}}]
+        }
+
+        insights = self._insights(client)
+
+        self.assertEqual(insights["peak_load"], 0.0)
+        self.assertEqual(insights["average_load"], 0.0)
+        self.assertEqual(insights["users"][0]["share"], 0.0)
+
+    def test_shares_are_out_of_every_user_not_just_the_ones_shown(self):
+        client = _fake_pi_client()
+        users = [
+            {"Total": 1.0, "Dimensions": {"db.user.name": f"user-{i}"}}
+            for i in range(pi_client.TOP_USERS + 2)
+        ]
+        client.describe_dimension_keys.side_effect = lambda **kwargs: {
+            "Keys": users if kwargs["GroupBy"]["Group"] == "db.user" else []
+        }
+
+        insights = self._insights(client)
+
+        self.assertEqual(len(insights["users"]), pi_client.TOP_USERS)
+        self.assertEqual(insights["users"][0]["share"], 1 / (pi_client.TOP_USERS + 2))
+
+    def test_times_are_utc_whatever_offset_aws_returns(self):
+        eastern = timezone(timedelta(hours=-5))
+        client = _fake_pi_client()
+        client.get_resource_metrics.return_value = {
+            "MetricList": [
+                {"DataPoints": [{"Timestamp": datetime(2026, 11, 1, 15, tzinfo=eastern)}]}
+            ]
+        }
+
+        insights = self._insights(client)
+
+        self.assertEqual(insights["load"][0]["time"], "2026-11-01T20:00:00+00:00")
+
+    def test_every_call_is_scoped_to_the_production_database(self):
+        client = _fake_pi_client()
+        self._insights(client)
+
+        calls = [client.get_resource_metrics.call_args] + (
+            client.describe_dimension_keys.call_args_list
+        )
+        for call in calls:
+            self.assertEqual(call.kwargs["ServiceType"], "RDS")
+            self.assertEqual(
+                call.kwargs["Identifier"], "db-UZ6WEKHZ2ZTWOOJCPYO3KAQECM"
+            )
+
+    def test_period_grows_with_the_window(self):
+        for window, period in (
+            (timedelta(hours=1), 60),
+            (timedelta(hours=6), 60),
+            (timedelta(hours=7), 300),
+            (timedelta(days=1), 300),
+            (timedelta(days=14), 3600),
+        ):
+            with self.subTest(window=window):
+                insights = self._insights(_fake_pi_client(), window)
+                self.assertEqual(insights["period_seconds"], period)
+
+    def test_refuses_a_window_over_the_maximum_without_calling_aws(self):
+        client = _fake_pi_client()
+
+        with self.assertRaises(pi_client.InvalidWindow):
+            self._insights(client, timedelta(days=15))
+
+        client.get_resource_metrics.assert_not_called()
+
+    def test_time_outside_retention_is_an_invalid_window(self):
+        client = _fake_pi_client()
+        client.get_resource_metrics.side_effect = _client_error(
+            "InvalidArgumentException"
+        )
+
+        with self.assertRaises(pi_client.InvalidWindow):
+            self._insights(client)
+
+    def test_aws_failures_are_reported_as_unavailable(self):
+        for failure in (
+            _client_error("NotAuthorizedException"),
+            EndpointConnectionError(endpoint_url="https://pi.example"),
+        ):
+            with self.subTest(failure=failure):
+                client = _fake_pi_client()
+                client.get_resource_metrics.side_effect = failure
+
+                with self.assertRaises(pi_client.PerformanceInsightsUnavailable):
+                    self._insights(client)
+
+
+class DatabaseInsightsApiTest(LeadClientMixin, TestCase):
+    URL = "/api/database/insights/"
+    WINDOW = {"start": "2026-11-01T20:00:00Z", "end": "2026-11-01T20:30:00Z"}
+
+    def test_passes_the_window_to_performance_insights(self):
+        with mock.patch(
+            "deployments.pi_client.get_insights", return_value={"load": []}
+        ) as get_insights:
+            response = self.client.get(self.URL, self.WINDOW)
+
+        self.assertEqual(response.status_code, 200)
+        start, end = get_insights.call_args.args
+        self.assertEqual(start, datetime(2026, 11, 1, 20, 0, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 11, 1, 20, 30, tzinfo=timezone.utc))
+
+    def test_rejects_bad_times_without_calling_aws(self):
+        for params in (
+            {},
+            {"start": self.WINDOW["start"]},
+            {"start": "yesterday", "end": self.WINDOW["end"]},
+            # Out of range, which parse_datetime raises on rather than returning None.
+            {"start": "2026-13-45T20:00:00Z", "end": self.WINDOW["end"]},
+            # No timezone: the same digits are hours apart in UTC and ET.
+            {"start": "2026-11-01T20:00:00", "end": "2026-11-01T20:30:00"},
+            {"start": self.WINDOW["end"], "end": self.WINDOW["start"]},
+        ):
+            with self.subTest(params=params):
+                with mock.patch("deployments.pi_client.get_insights") as get_insights:
+                    response = self.client.get(self.URL, params)
+
+                self.assertEqual(response.status_code, 400)
+                get_insights.assert_not_called()
+
+    def test_clamps_end_to_now(self):
+        future = datetime.now(timezone.utc) + timedelta(days=1)
+
+        with mock.patch(
+            "deployments.pi_client.get_insights", return_value={}
+        ) as get_insights:
+            self.client.get(
+                self.URL,
+                {
+                    "start": (future - timedelta(days=2)).isoformat(),
+                    "end": future.isoformat(),
+                },
+            )
+
+        self.assertLess(get_insights.call_args.args[1], future)
+
+    def test_invalid_window_is_a_400(self):
+        with mock.patch(
+            "deployments.pi_client.get_insights",
+            side_effect=pi_client.InvalidWindow("too long"),
+        ):
+            response = self.client.get(self.URL, self.WINDOW)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "too long")
+
+    def test_unavailable_is_a_503_that_hides_the_aws_error(self):
+        with mock.patch(
+            "deployments.pi_client.get_insights",
+            side_effect=pi_client.PerformanceInsightsUnavailable("secret arn"),
+        ):
+            with self.assertLogs("deployments.views", level="ERROR"):
+                response = self.client.get(self.URL, self.WINDOW)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("secret arn", response.content.decode())
+
+
+class DatabaseInsightsAccessTest(TestCase):
+    """Query text can hold any product's data, so this is closed to everyone else."""
+
+    URL = "/api/database/insights/"
+    WINDOW = DatabaseInsightsApiTest.WINDOW
+
+    def test_refuses_anonymous_visitors(self):
+        with mock.patch("deployments.pi_client.get_insights") as get_insights:
+            response = Client().get(self.URL, self.WINDOW)
+
+        self.assertEqual(response.status_code, 403)
+        get_insights.assert_not_called()
+
+    def test_refuses_signed_in_non_leads(self):
+        client = Client()
+        client.force_login(_make_user("member", is_lead=False))
+
+        with mock.patch("deployments.pi_client.get_insights") as get_insights:
+            response = client.get(self.URL, self.WINDOW)
+
+        self.assertEqual(response.status_code, 403)
+        get_insights.assert_not_called()

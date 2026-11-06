@@ -368,6 +368,34 @@ k8s/
 docker-compose.yml                   # one-command local stack
 ```
 
+## Database page
+
+`/database` shows what the shared production database was doing at any point in
+the history AWS keeps: load over time, then the top queries, database users and
+wait events for that window. It's for answering "which query was that?" when the
+RDS CPU alarm fires. Paste the alarm email into the box, or share the page's URL,
+which holds the time window.
+
+The data comes from [Performance Insights](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.html)
+through `deployments/pi_client.py`, not from the database itself, so the dashboard
+has no database credentials. In production the backend's ServiceAccount assumes
+the `dashboard-backend` IAM role (`terraform/dashboard.tf` in
+`pennlabs/infrastructure`). Locally, boto3 uses your own AWS profile:
+
+```bash
+AWS_PROFILE=pennlabs ./dev.sh
+```
+
+Two things to keep in mind when reading it:
+
+- Query text can include real values despite being "tokenized", which is why the
+  endpoint is limited to team leads like the rest of the API.
+- Load is sampled once a second. It shows what the database spent its time on, not
+  how many times a query ran, and it can't say which request sent a query.
+
+If the instance is resized, set `DATABASE_VCPUS` so the graph's vCPU line stays
+right.
+
 ## How K8s discovery works
 
 The dashboard relies on three labels Penn Labs' Kittyhawk library applies to

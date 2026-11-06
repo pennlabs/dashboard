@@ -28,6 +28,9 @@ dependencies = [
     # Reads commit messages and authors from the GitHub API.
     "requests==2.*",
 
+    # Reads Performance Insights for the Database page. See deployments/pi_client.py.
+    "boto3==1.*",
+
     # WSGI server used by the Docker image.
     "gunicorn==21.*",
 ]
