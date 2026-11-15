@@ -11,17 +11,22 @@ unless they explicitly opt out with `@permission_classes([AllowAny])`. Only
 `health_check` and `me` do.
 """
 
+import logging
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from django.http import JsonResponse
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from kubernetes.client.exceptions import ApiException
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from . import github_client, k8s_client
+from . import github_client, k8s_client, pi_client
+
+logger = logging.getLogger(__name__)
 
 
 def _build_products(deployments: list[Any]) -> dict[str, dict]:
@@ -161,3 +166,42 @@ def rollback_deployment(request, namespace: str, name: str):
     except ApiException as exc:
         return Response({"error": str(exc)}, status=exc.status or 500)
     return Response({"status": "rollback triggered", "image": image})
+
+
+def _parse_time(raw: str | None) -> datetime | None:
+    """A timezone-aware time from a query parameter, or None if it isn't one."""
+    try:
+        parsed = parse_datetime(raw or "")
+    except ValueError:
+        return None
+    return parsed if parsed and parsed.tzinfo else None
+
+
+@api_view(["GET"])
+def database_insights(request):
+    """What the production database was doing between `start` and `end`.
+
+    Both are ISO 8601 times with a timezone. Restricted to team leads by the
+    default `IsTeamLead` permission, which matters here: query text can contain
+    values from any product (see `pi_client.get_insights`).
+    """
+    start = _parse_time(request.query_params.get("start"))
+    end = _parse_time(request.query_params.get("end"))
+    if not start or not end:
+        return Response(
+            {"error": "start and end must be ISO 8601 times with a timezone"},
+            status=400,
+        )
+
+    # The future has no data, and asking for it would just stretch the graph.
+    end = min(end, datetime.now(timezone.utc))
+    if start >= end:
+        return Response({"error": "start must be before end"}, status=400)
+
+    try:
+        return Response(pi_client.get_insights(start, end))
+    except pi_client.InvalidWindow as exc:
+        return Response({"error": str(exc)}, status=400)
+    except pi_client.PerformanceInsightsUnavailable as exc:
+        logger.error("Performance Insights lookup failed: %s", exc)
+        return Response({"error": "Performance Insights is unavailable"}, status=503)

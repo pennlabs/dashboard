@@ -61,6 +61,39 @@ export interface Product {
   deployments: DeploymentSummary[]
 }
 
+/** One sample of database load, in average active sessions. Null is a gap. */
+export interface LoadPoint {
+  time: string
+  load: number | null
+}
+
+export interface LoadShare {
+  name: string
+  load: number
+  share: number
+}
+
+export interface TopQuery {
+  id: string
+  statement: string
+  load: number
+  share: number
+}
+
+/** Response from /api/database/insights/, for one time window. */
+export interface DatabaseInsights {
+  start: string
+  end: string
+  period_seconds: number
+  vcpus: number
+  peak_load: number
+  average_load: number
+  load: LoadPoint[]
+  queries: TopQuery[]
+  users: LoadShare[]
+  waits: LoadShare[]
+}
+
 export interface UserProfile {
   pennkey: string
   first_name: string

@@ -1,4 +1,11 @@
-import type { Commits, CurrentUser, Deployment, Pod, Product } from "../types"
+import type {
+  Commits,
+  CurrentUser,
+  DatabaseInsights,
+  Deployment,
+  Pod,
+  Product,
+} from "../types"
 
 // Empty by default: the dev server proxies /api to Django (see setupProxy.js) and
 // in production nginx and the API sit behind the same host. Same-origin requests
@@ -79,6 +86,11 @@ export const getDeployment = (namespace: string, name: string) =>
 export const getCommits = (namespace: string, name: string) =>
   apiFetch<Commits>(
     `/api/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/commits/`
+  )
+
+export const getDatabaseInsights = (start: string, end: string) =>
+  apiFetch<DatabaseInsights>(
+    `/api/database/insights/?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
   )
 
 export const getPods = (namespace: string, name: string) =>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { BrowserRouter, Link, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom"
 
 import { logoutUrl } from "./api"
 import AuthGate from "./components/AuthGate"
@@ -7,6 +7,7 @@ import LabsLogo from "./components/LabsLogo"
 import ThemeToggle from "./components/ThemeToggle"
 import { useAuth } from "./hooks/useAuth"
 import Dashboard from "./pages/Dashboard"
+import Database from "./pages/Database"
 import DeploymentDetail from "./pages/DeploymentDetail"
 import ProductDetail from "./pages/ProductDetail"
 import { ThemeProvider } from "./theme"
@@ -33,10 +34,15 @@ export default function App() {
           <div className="app-shell">
             <header className="app-header">
               <div className="app-header-inner">
-                <Link to="/" className="brand">
-                  <LabsLogo />
-                  <span>Deployments</span>
-                </Link>
+                <div className="header-nav">
+                  <Link to="/" className="brand">
+                    <LabsLogo />
+                    <span>Deployments</span>
+                  </Link>
+                  <NavLink to="/database" className="nav-link">
+                    Database
+                  </NavLink>
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className="live-pill">
                     <span className="dot" />
@@ -53,6 +59,7 @@ export default function App() {
               <AuthGate>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
+                  <Route path="/database" element={<Database />} />
                   <Route path="/products/:name" element={<ProductDetail />} />
                   <Route
                     path="/deployments/:namespace/:name"

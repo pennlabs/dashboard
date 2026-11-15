@@ -66,9 +66,9 @@ class DashboardChart extends PennLabsChart {
     //      `serviceAccountName` when `props.serviceAccount` (an object) is set.
     //      So it creates a ServiceAccount and never attaches it -- the pod
     //      silently runs as `default`. Still unfixed upstream as of 1.1.11.
-    //   2. It also annotates the SA for IRSA (`eks.amazonaws.com/role-arn`),
-    //      which expects a matching IAM role to exist. We don't need one: this
-    //      backend calls the Kubernetes API, not any AWS API.
+    //   2. It names the SA and IAM role after the release (`dashboard`), whereas
+    //      this role is `dashboard-backend`, to match the SA the binding below
+    //      refers to.
     //
     // These live in the chart rather than a hand-written rbac.yaml so that CI
     // applies them along with everything else. (ClusterRole/ClusterRoleBinding
@@ -79,8 +79,18 @@ class DashboardChart extends PennLabsChart {
     // Penn Labs pod authenticates to Docker Hub. A pod running as this SA does
     // not inherit it, so without restating it here the backend would pull
     // anonymously -- rate-limited, and an ImagePullBackOff if the image is private.
+    //
+    // The role-arn annotation is what gives the pod temporary AWS credentials,
+    // for Performance Insights on the Database page. The IAM role itself is
+    // `terraform/dashboard.tf` in pennlabs/infrastructure. Without it only that
+    // page fails: the rest of the backend never calls AWS.
     const serviceAccount = new KubeServiceAccount(this, "backend-sa", {
-      metadata: { name: "dashboard-backend" },
+      metadata: {
+        name: "dashboard-backend",
+        annotations: {
+          "eks.amazonaws.com/role-arn": `arn:aws:iam::${process.env.AWS_ACCOUNT_ID}:role/dashboard-backend`,
+        },
+      },
       imagePullSecrets: [{ name: "docker-pull-secret" }],
     })
 
